@@ -90,6 +90,7 @@ pub struct State {
 ///
 /// Note that increases in LoD are not represented here; it is always the responsibility of the
 /// higher-detail chunk to account for neighboring lower-detail chunks.
+#[derive(Default)]
 pub struct Neighborhood {
     /// Decrease in LoD in the local -X direction
     pub nx: u8,
@@ -150,7 +151,6 @@ impl Walker {
                             ChunkState {
                                 chunk,
                                 slot,
-                                subdivide: viewpoints.iter().any(|v| needs_subdivision(&chunk, v)),
                                 renderable: slot.map_or(false, |idx| mgr.chunks[idx as usize].ready),
                             }
             );
@@ -180,6 +180,18 @@ impl Walker {
             self.out.transfer.push(chunk.chunk);
         }
 
+        let subdivide = viewpoints
+            .iter()
+            .any(|v| needs_subdivision(&chunk.chunk, v));
+        if !subdivide {
+            if chunk.renderable {
+                self.out
+                    .render
+                    .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
+            }
+            return;
+        }
+
         let children = chunk.chunk.children();
         let child_slots = [
             mgr.get(&children[0]),
@@ -187,44 +199,33 @@ impl Walker {
             mgr.get(&children[2]),
             mgr.get(&children[3]),
         ];
-        let children_renderable = chunk.renderable
-            && chunk.subdivide
-            && child_slots
+        // The children of this chunk might be rendered if:
+        let children_renderable = chunk.renderable // this subtree should be rendered at all, and
+            && child_slots                         // every child is already resident in the cache
             .iter()
             .all(|slot| slot.map_or(false, |x| mgr.chunks[x as usize].ready));
+        // If this subtree should be rendered and the children can't be rendered, this chunk must be rendered.
         if chunk.renderable && !children_renderable {
-            let neighborhood = Neighborhood {
-                nx: 0,
-                ny: 0,
-                px: 0,
-                py: 0,
-            }; // Filled in later
             self.out
                 .render
-                .push((chunk.chunk, neighborhood, chunk.slot.unwrap()));
+                .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
         }
-        const MAX_DEPTH: u8 = 12;
-        if chunk.subdivide {
-            for (&child, &slot) in children
-                .iter()
-                .zip(child_slots.iter())
-            {
-                self.walk_inner(mgr, viewpoints, ChunkState {
+        for (&child, &slot) in children.iter().zip(child_slots.iter()) {
+            self.walk_inner(
+                mgr,
+                viewpoints,
+                ChunkState {
                     chunk: child,
                     renderable: children_renderable,
                     slot,
-                    subdivide: child.depth < MAX_DEPTH
-                        && viewpoints.iter().any(|v| needs_subdivision(&child, v)),
-                });
-            )
+                },
+            );
         }
     }
 }
 
 struct ChunkState {
     chunk: Chunk,
-    /// Whether this chunk should be subdivided
-    subdivide: bool,
     /// Cache slot associated with this chunk, whether or not it's ready
     slot: Option<u32>,
     /// True iff this chunk or its children will be rendered
@@ -232,6 +233,11 @@ struct ChunkState {
 }
 
 fn needs_subdivision(chunk: &Chunk, viewpoint: &na::Point3<f64>) -> bool {
+    const MAX_DEPTH: u8 = 12;
+    if chunk.depth >= MAX_DEPTH {
+        return false;
+    }
+
     // Angle of a cone that intersects inscribed circles on a chunk of depth D and a neighbor of
     // depth D+1. Setting a threshold larger than this leads to LoD deltas greater than 1 across
     // edges.
