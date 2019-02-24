@@ -31,13 +31,19 @@ impl Manager {
     pub fn update(&mut self, viewpoints: &[na::Point3<f64>]) -> State {
         let mut walker = Walker::with_capacity(self.chunks.capacity());
         walker.walk(&self, viewpoints);
-        
-        // Make room for transfers
+
+        // Make room for transfers by discarding chunks that we don't currently need.
         let mut available = self.chunks.capacity() - self.chunks.len();
-        for idx in walker.used.iter().cloned().enumerate()
+        for idx in walker
+            .used
+            .iter()
+            .cloned()
+            .enumerate()
             .filter_map(|(idx, used)| if used { None } else { Some(idx) })
         {
-            if available >= walker.out.transfer.len() { break; }
+            if available >= walker.out.transfer.len() {
+                break;
+            }
             if self.chunks.contains(idx as usize) && self.chunks[idx as usize].ready {
                 let old = self.chunks.remove(idx as usize);
                 self.index.remove(&old.chunk);
@@ -57,7 +63,10 @@ impl Manager {
         if self.chunks.len() == self.chunks.capacity() {
             return None;
         }
-        let slot = self.chunks.insert(Slot { chunk, ready: false }) as u32;
+        let slot = self.chunks.insert(Slot {
+            chunk,
+            ready: false,
+        }) as u32;
         self.index.insert(chunk, slot);
         Some(slot)
     }
@@ -86,7 +95,9 @@ pub struct State {
 ///
 /// Smoothly interpolating across chunk boundaries requires careful attention to these values. In
 /// particular, any visualization of chunk data should take care to be continuous at the edge with
-/// regard to an adjacent lower-detail level if discontinuities are undesirable.
+/// regard to an adjacent lower-detail level if discontinuities are undesirable. For example,
+/// terrain using heightmapped tiles should weld together a subset of the vertices on an edge shared
+/// with a lower-detail chunk.
 ///
 /// Note that increases in LoD are not represented here; it is always the responsibility of the
 /// higher-detail chunk to account for neighboring lower-detail chunks.
@@ -147,20 +158,29 @@ impl Walker {
         // Gather the set of chunks we can should render and want to transfer
         for chunk in chunk::Face::iter().map(Chunk::root) {
             let slot = mgr.get(&chunk);
-            self.walk_inner(mgr, viewpoints,
-                            ChunkState {
-                                chunk,
-                                slot,
-                                renderable: slot.map_or(false, |idx| mgr.chunks[idx as usize].ready),
-                            }
+            // Kick off the loop for each face's quadtree
+            self.walk_inner(
+                mgr,
+                viewpoints,
+                ChunkState {
+                    chunk,
+                    slot,
+                    renderable: slot.map_or(false, |idx| mgr.chunks[idx as usize].ready),
+                },
             );
         }
 
         // Compute the LoD delta neighborhood of each rendered chunk
-        let rendering = self.out.render.iter().map(|&(chunk, _, _)| chunk).collect::<FxHashSet<_>>();
+        let rendering = self
+            .out
+            .render
+            .iter()
+            .map(|&(chunk, _, _)| chunk)
+            .collect::<FxHashSet<_>>();
         for &mut (chunk, ref mut neighborhood, _) in &mut self.out.render {
             use chunk::Edge;
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
+                // Compute the LoD difference to the rendered neighbor on this edge, if any
                 if let Some(neighbor) = neighbor.path().find(|x| rendering.contains(&x)) {
                     neighborhood[edge] = chunk.depth - neighbor.depth;
                 }
@@ -168,12 +188,10 @@ impl Walker {
         }
     }
 
-    fn walk_inner(
-        &mut self,
-        mgr: &Manager,
-        viewpoints: &[na::Point3<f64>],
-        chunk: ChunkState,
-    ) {
+    /// Walk the quadtree below `chunk`, recording chunks to render and transfer.
+    fn walk_inner(&mut self, mgr: &Manager, viewpoints: &[na::Point3<f64>], chunk: ChunkState) {
+        // If this chunk is already associated with a cache slot, preserve that slot; otherwise,
+        // tell the caller we want it.
         if let Some(idx) = chunk.slot {
             self.used[idx as usize] = true;
         } else {
@@ -210,6 +228,7 @@ impl Walker {
                 .render
                 .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
         }
+        // Recurse into the children
         for (&child, &slot) in children.iter().zip(child_slots.iter()) {
             self.walk_inner(
                 mgr,
@@ -228,7 +247,7 @@ struct ChunkState {
     chunk: Chunk,
     /// Cache slot associated with this chunk, whether or not it's ready
     slot: Option<u32>,
-    /// True iff this chunk or its children will be rendered
+    /// Whether the subtree at this chunk will be rendered
     renderable: bool,
 }
 
@@ -238,9 +257,9 @@ fn needs_subdivision(chunk: &Chunk, viewpoint: &na::Point3<f64>) -> bool {
         return false;
     }
 
-    // Angle of a cone that intersects inscribed circles on a chunk of depth D and a neighbor of
-    // depth D+1. Setting a threshold larger than this leads to LoD deltas greater than 1 across
-    // edges.
+    // Half-angle of the cone whose edges are simultaneously tangent to the edges of a pair of
+    // circles inscribed on a chunk at depth D and a neighbor of that chunk at depth D+1. Setting a
+    // threshold larger than this leads to LoD deltas greater than 1 across edges.
     let max_half_angle = 1.0f64.atan2(10.0f64.sqrt());
 
     let center = na::Point3::from(chunk.face.basis() * chunk.origin_on_face().into_inner());

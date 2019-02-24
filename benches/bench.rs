@@ -8,9 +8,9 @@ criterion_main!(benches);
 fn cache(c: &mut Criterion) {
     let mut mgr = CacheManager::with_capacity(2048);
     let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
-    resolve_transfers(&mut mgr, &state.transfer);    
+    resolve_transfers(&mut mgr, &state.transfer);
     c.bench_function("best-case update", move |b| {
-        b.iter(|| mgr.update(&[na::Point3::from(na::Vector3::z())]) );
+        b.iter(|| mgr.update(&[na::Point3::from(na::Vector3::z())]));
     });
 
     let mut mgr = CacheManager::with_capacity(2048);
@@ -26,7 +26,7 @@ fn cache(c: &mut Criterion) {
             } else {
                 mgr.update(&[diagonal2])
             };
-            resolve_transfers(&mut mgr, &state.transfer);    
+            resolve_transfers(&mut mgr, &state.transfer);
             which = !which;
         });
     });
