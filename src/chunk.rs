@@ -280,6 +280,18 @@ impl Chunk {
             next: (0, 0),
         }
     }
+
+    /// Compute the single-precision origin of the chunk relative to its side of the sphere, and a
+    /// transform from chunk-local space around that origin to view space.
+    ///
+    /// By computing the worldview matrix with double precision and rounding down, this allows
+    /// vertices on a chunk to be efficiently and seamlessly computed by a GPU for planet-sized
+    /// spheres.
+    pub fn worldview(&self, view: &na::IsometryMatrix3<f64>, sphere_radius: f64) -> (na::Point3<f32>, na::IsometryMatrix3<f32>) {
+        let origin = na::convert::<_, na::Vector3<f32>>(sphere_radius * self.origin_on_face().into_inner());
+        let world = self.face.basis() * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
+        (na::Point3::from(origin), na::convert(view * world))
+    }
 }
 
 #[derive(Debug)]
