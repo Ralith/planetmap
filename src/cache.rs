@@ -277,6 +277,7 @@ fn needs_subdivision(chunk: &Chunk, viewpoint: &na::Point3<f64>) -> bool {
     let max_half_angle = 1.0f64.atan2(10.0f64.sqrt());
 
     let center = na::Point3::from(chunk.face.basis() * chunk.origin_on_face().into_inner());
+    if center.coords.dot(&viewpoint.coords) < 0.0 { return false; }
     let distance = na::distance(&center, viewpoint);
     // Half-angle of the circular cone from the camera containing an inscribed sphere
     let half_angle = (chunk.edge_length() * 0.5).atan2(distance);
