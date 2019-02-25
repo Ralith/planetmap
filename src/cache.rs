@@ -282,3 +282,22 @@ fn needs_subdivision(chunk: &Chunk, viewpoint: &na::Point3<f64>) -> bool {
     let half_angle = (chunk.edge_length() * 0.5).atan2(distance);
     half_angle >= max_half_angle
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn transfer_completeness() {
+        let mut mgr = Manager::new(2048, Config::default());
+        let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
+        assert_eq!(state.render.len(), 0);
+        for transfer in state.transfer {
+            let slot = mgr.allocate(transfer).unwrap();
+            mgr.release(slot);
+        }
+        let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
+        assert_eq!(state.transfer.len(), 0);
+        assert_ne!(state.render.len(), 0);
+    }
+}
