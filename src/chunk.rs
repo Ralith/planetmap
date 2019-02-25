@@ -516,6 +516,18 @@ mod test {
     }
 
     #[test]
+    fn sample_lod_boundaries() {
+        let chunk = Chunk {
+            face: Face::PZ,
+            depth: 10,
+            coords: (12, 34),
+        };
+        let children = chunk.children();
+        let neighbor = chunk.neighbors()[0];
+        assert_eq!(children[0].samples(5).map(|child_vert| neighbor.samples(5).filter(|&neighbor_vert| neighbor_vert == child_vert).count()).sum::<usize>(), 3);
+    }
+
+    #[test]
     fn origin_sanity() {
         assert_eq!(
             Chunk::root(Face::PZ).origin_on_face(),
