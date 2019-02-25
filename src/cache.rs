@@ -12,18 +12,34 @@ struct Slot {
     ready: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Maximum depth of quad-tree traversal
+    pub max_depth: u8,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            max_depth: 12,
+        }
+    }
+}
+
 /// Helper for streaming `Chunk`-oriented LoD into a fixed-size cache
 pub struct Manager {
     chunks: Slab<Slot>,
     index: FxHashMap<Chunk, u32>,
+    config: Config,
 }
 
 impl Manager {
-    /// Create a manager for a cache of `capacity` slots
-    pub fn with_capacity(capacity: usize) -> Self {
+    /// Create a manager for a cache of `slots` slots
+    pub fn new(slots: usize, config: Config) -> Self {
         Self {
-            chunks: Slab::with_capacity(capacity),
-            index: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
+            chunks: Slab::with_capacity(slots),
+            index: FxHashMap::with_capacity_and_hasher(slots, Default::default()),
+            config,
         }
     }
 
@@ -200,9 +216,10 @@ impl Walker {
             self.out.transfer.push(chunk.chunk);
         }
 
-        let subdivide = viewpoints
-            .iter()
-            .any(|v| needs_subdivision(&chunk.chunk, v));
+        let subdivide = chunk.chunk.depth < mgr.config.max_depth
+            && viewpoints
+                .iter()
+                .any(|v| needs_subdivision(&chunk.chunk, v));
         if !subdivide {
             if chunk.renderable {
                 self.out
@@ -254,11 +271,6 @@ struct ChunkState {
 }
 
 fn needs_subdivision(chunk: &Chunk, viewpoint: &na::Point3<f64>) -> bool {
-    const MAX_DEPTH: u8 = 12;
-    if chunk.depth >= MAX_DEPTH {
-        return false;
-    }
-
     // Half-angle of the cone whose edges are simultaneously tangent to the edges of a pair of
     // circles inscribed on a chunk at depth D and a neighbor of that chunk at depth D+1. Setting a
     // threshold larger than this leads to LoD deltas greater than 1 across edges.

@@ -6,14 +6,14 @@ criterion_group!(benches, cache);
 criterion_main!(benches);
 
 fn cache(c: &mut Criterion) {
-    let mut mgr = CacheManager::with_capacity(2048);
+    let mut mgr = CacheManager::new(2048, Default::default());
     let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
     resolve_transfers(&mut mgr, &state.transfer);
     c.bench_function("best-case update", move |b| {
         b.iter(|| mgr.update(&[na::Point3::from(na::Vector3::z())]));
     });
 
-    let mut mgr = CacheManager::with_capacity(2048);
+    let mut mgr = CacheManager::new(2048, Default::default());
     let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
     resolve_transfers(&mut mgr, &state.transfer);
     let diagonal1 = na::Point3::from(-na::Vector3::new(1.0, 1.0, 1.0).normalize());
