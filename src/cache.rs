@@ -27,7 +27,9 @@ impl Manager {
         }
     }
 
-    /// Compute slots to render for a given point of view, and to load for improved detail
+    /// Compute slots to render for a given set of viewpoints, and to load for improved detail.
+    ///
+    /// Viewpoints should be scaled to match a sphere of radius 1.
     pub fn update(&mut self, viewpoints: &[na::Point3<f64>]) -> State {
         let mut walker = Walker::with_capacity(self.chunks.capacity());
         walker.walk(&self, viewpoints);
