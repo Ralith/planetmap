@@ -1,140 +1,18 @@
 use std::{fmt, mem};
 
-/// Face of a cube, identified by normal vector
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-#[repr(u8)]
-pub enum Face {
-    PX,
-    NX,
-    PY,
-    NY,
-    PZ,
-    NZ,
-}
-
-impl fmt::Display for Face {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Face::*;
-        let s = match *self {
-            PX => "+X",
-            NX => "-X",
-            PY => "+Y",
-            NY => "-Y",
-            PZ => "+Z",
-            NZ => "-Z",
-        };
-        f.write_str(s)
-    }
-}
-
-impl Face {
-    /// Transform from face space (facing +Z) to sphere space (facing the named axis).
-    pub fn basis(&self) -> na::Rotation3<f64> {
-        use self::Face::*;
-        let (x, y, z) = match *self {
-            PX => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
-            NX => (-na::Vector3::z(), -na::Vector3::y(), -na::Vector3::x()),
-            PY => (na::Vector3::x(), -na::Vector3::z(), na::Vector3::y()),
-            NY => (na::Vector3::x(), na::Vector3::z(), -na::Vector3::y()),
-            PZ => (na::Vector3::x(), na::Vector3::y(), na::Vector3::z()),
-            NZ => (-na::Vector3::x(), na::Vector3::y(), -na::Vector3::z()),
-        };
-        na::Rotation3::<f64>::from_matrix_unchecked(na::Matrix3::from_columns(&[x, y, z]))
-    }
-
-    pub fn iter() -> impl Iterator<Item = Face> {
-        const VALUES: &[Face] = &[Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ];
-        VALUES.iter().cloned()
-    }
-
-    /// Neighboring faces wrt. local axes [-x, -y, +x, +y].
-    ///
-    /// Returns the neighboring face, the edge of that face, and whether the axis shared with that face is parallel or antiparallel.
-    ///
-    /// Index by `sign << 1 | axis`.
-    pub fn neighbors(&self) -> &'static [(Face, Edge, bool); 4] {
-        use self::Face::*;
-        match *self {
-            PX => &[
-                (NZ, Edge::NX, false),
-                (PY, Edge::PX, false),
-                (PZ, Edge::PX, false),
-                (NY, Edge::PX, true),
-            ],
-            NX => &[
-                (PZ, Edge::NX, false),
-                (PY, Edge::NX, true),
-                (NZ, Edge::PX, false),
-                (NY, Edge::NX, false),
-            ],
-            PY => &[
-                (NX, Edge::NY, true),
-                (PZ, Edge::PY, true),
-                (PX, Edge::NY, false),
-                (NZ, Edge::PY, false),
-            ],
-            NY => &[
-                (NX, Edge::PY, false),
-                (NZ, Edge::NY, false),
-                (PX, Edge::PY, true),
-                (PZ, Edge::NY, true),
-            ],
-            PZ => &[
-                (NX, Edge::NX, false),
-                (NY, Edge::PY, true),
-                (PX, Edge::PX, false),
-                (PY, Edge::NY, true),
-            ],
-            NZ => &[
-                (PX, Edge::NX, false),
-                (NY, Edge::NY, false),
-                (NX, Edge::PX, false),
-                (PY, Edge::PY, false),
-            ],
-        }
-    }
-}
-
-/// Boundary of a chunk
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(u8)]
-pub enum Edge {
-    NX = 0,
-    NY = 1,
-    PX = 2,
-    PY = 3,
-}
-
-impl Edge {
-    pub fn iter() -> impl Iterator<Item = Edge> {
-        [Edge::NX, Edge::NY, Edge::PX, Edge::PY].iter().cloned()
-    }
-}
-
-impl ::std::ops::Neg for Edge {
-    type Output = Self;
-    fn neg(self) -> Self {
-        use self::Edge::*;
-        match self {
-            PX => NX,
-            PY => NY,
-            NX => PX,
-            NY => PY,
-        }
-    }
-}
-
-/// A bounded manifold domain on the surface of a sphere that a square grid of samples may be
-/// continuously mapped to
+/// A node of a quadtree on a particular cubemap face
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Chunk {
+    /// Coordinates within the set of nodes at this depth in the quadtree
     pub coords: (u32, u32),
+    /// Depth in the quadtree
     pub depth: u8,
+    /// Cubemap face on which the quadtree lies
     pub face: Face,
 }
 
 impl Chunk {
-    /// The top-level chunk corresponding to a particular cube face
+    /// The top-level chunk corresponding to a particular cubemap face
     pub fn root(face: Face) -> Self {
         Self {
             coords: (0, 0),
@@ -291,6 +169,138 @@ impl Chunk {
         let origin = na::convert::<_, na::Vector3<f32>>(sphere_radius * self.origin_on_face().into_inner());
         let world = self.face.basis() * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
         (na::Point3::from(origin), na::convert(view * world))
+    }
+}
+
+/// Face of a cubemap, identified by direction
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[repr(u8)]
+pub enum Face {
+    /// The face in the +X direction
+    PX,
+    /// The face in the -X direction
+    NX,
+    /// The face in the +Y direction
+    PY,
+    /// The face in the -Y direction
+    NY,
+    /// The face in the +Z direction
+    PZ,
+    /// The face in the -Z direction
+    NZ,
+}
+
+impl fmt::Display for Face {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Face::*;
+        let s = match *self {
+            PX => "+X",
+            NX => "-X",
+            PY => "+Y",
+            NY => "-Y",
+            PZ => "+Z",
+            NZ => "-Z",
+        };
+        f.write_str(s)
+    }
+}
+
+impl Face {
+    /// Transform from face space (facing +Z) to sphere space (facing the named axis).
+    pub fn basis(&self) -> na::Rotation3<f64> {
+        use self::Face::*;
+        let (x, y, z) = match *self {
+            PX => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
+            NX => (-na::Vector3::z(), -na::Vector3::y(), -na::Vector3::x()),
+            PY => (na::Vector3::x(), -na::Vector3::z(), na::Vector3::y()),
+            NY => (na::Vector3::x(), na::Vector3::z(), -na::Vector3::y()),
+            PZ => (na::Vector3::x(), na::Vector3::y(), na::Vector3::z()),
+            NZ => (-na::Vector3::x(), na::Vector3::y(), -na::Vector3::z()),
+        };
+        na::Rotation3::<f64>::from_matrix_unchecked(na::Matrix3::from_columns(&[x, y, z]))
+    }
+
+    /// Iterator over all `Face`s
+    pub fn iter() -> impl Iterator<Item = Face> {
+        const VALUES: &[Face] = &[Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ];
+        VALUES.iter().cloned()
+    }
+
+    /// Neighboring faces wrt. local axes [-x, -y, +x, +y].
+    ///
+    /// Returns the neighboring face, the edge of that face, and whether the axis shared with that face is parallel or antiparallel.
+    ///
+    /// Index by `sign << 1 | axis`.
+    pub fn neighbors(&self) -> &'static [(Face, Edge, bool); 4] {
+        use self::Face::*;
+        match *self {
+            PX => &[
+                (NZ, Edge::NX, false),
+                (PY, Edge::PX, false),
+                (PZ, Edge::PX, false),
+                (NY, Edge::PX, true),
+            ],
+            NX => &[
+                (PZ, Edge::NX, false),
+                (PY, Edge::NX, true),
+                (NZ, Edge::PX, false),
+                (NY, Edge::NX, false),
+            ],
+            PY => &[
+                (NX, Edge::NY, true),
+                (PZ, Edge::PY, true),
+                (PX, Edge::NY, false),
+                (NZ, Edge::PY, false),
+            ],
+            NY => &[
+                (NX, Edge::PY, false),
+                (NZ, Edge::NY, false),
+                (PX, Edge::PY, true),
+                (PZ, Edge::NY, true),
+            ],
+            PZ => &[
+                (NX, Edge::NX, false),
+                (NY, Edge::PY, true),
+                (PX, Edge::PX, false),
+                (PY, Edge::NY, true),
+            ],
+            NZ => &[
+                (PX, Edge::NX, false),
+                (NY, Edge::NY, false),
+                (NX, Edge::PX, false),
+                (PY, Edge::PY, false),
+            ],
+        }
+    }
+}
+
+/// Boundary of a `Chunk`
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Edge {
+    NX = 0,
+    NY = 1,
+    PX = 2,
+    PY = 3,
+}
+
+impl Edge {
+    /// Iterator over all `Edge`s
+    pub fn iter() -> impl Iterator<Item = Edge> {
+        [Edge::NX, Edge::NY, Edge::PX, Edge::PY].iter().cloned()
+    }
+}
+
+impl ::std::ops::Neg for Edge {
+    type Output = Self;
+    fn neg(self) -> Self {
+        use self::Edge::*;
+        match self {
+            PX => NX,
+            PY => NY,
+            NX => PX,
+            NY => PY,
+        }
     }
 }
 
