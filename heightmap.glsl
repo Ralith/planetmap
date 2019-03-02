@@ -4,7 +4,7 @@
 struct Vertex {
     // Position of the vertex relative to Chunk.origin
     vec3 position;
-    // Position of the vertex within the chunk
+    // Texture coordinates of the vertex, ranging from 0.5 / resolution to 1 - 0.5 / resolution
     vec2 texcoords;
     // Unit vector away from the center of the sphere
     vec3 normal;
@@ -54,11 +54,14 @@ Vertex chunk_vertex(uint quads, float radius, sampler2DArray heightmaps, Chunk c
     quad_coord.x &= (-1 << uint(quad_coord.y == 0) * neighborhood.y) & (-1 << uint(quad_coord.y == quads) * neighborhood.w);
     quad_coord.y &= (-1 << uint(quad_coord.x == 0) * neighborhood.x) & (-1 << uint(quad_coord.x == quads) * neighborhood.z);
 
-    vec2 texcoords = vec2(quad_coord) / quads;
+    vec2 unit_coords = vec2(quad_coord) / quads; // 0..1
+    float offset = 0.5 / (quads+1);              // Center of the first texel
+    float range = 1.0 - (2.0 * offset);          // Distance between centers of first and last texels
+    vec2 texcoords = unit_coords * range + vec2(offset);
 
     float height = texture(heightmaps, vec3(texcoords, chunk.slot)).x;
 
-    vec3 local_normal = unit_to_sphere(chunk, texcoords);
+    vec3 local_normal = unit_to_sphere(chunk, unit_coords);
     
     Vertex result;
     result.position = (radius * local_normal - chunk.origin) + height * local_normal;

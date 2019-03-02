@@ -184,8 +184,8 @@ fn main() {
         let staging = slice::from_raw_parts_mut(staging_ptr, STAGING_BUFFER_LENGTH as usize);
 
         let sampler_info = vk::SamplerCreateInfo {
-            mag_filter: vk::Filter::NEAREST,
-            min_filter: vk::Filter::NEAREST,
+            mag_filter: vk::Filter::LINEAR,
+            min_filter: vk::Filter::LINEAR,
             mipmap_mode: vk::SamplerMipmapMode::NEAREST,
             address_mode_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
             address_mode_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
