@@ -180,6 +180,12 @@ impl Cache {
                     },
                 );
             }
+            self.shared.device.flush_mapped_memory_ranges(&[vk::MappedMemoryRange {
+                memory: self.instance_memory,
+                offset: 0,
+                size: vk::WHOLE_SIZE,
+                ..Default::default()
+            }]).unwrap()
         }
         (count, state.transfer)
     }
