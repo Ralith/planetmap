@@ -224,7 +224,7 @@ fn main() {
             vk::DescriptorSetLayoutBinding {
                 descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                 descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::VERTEX,
+                stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                 ..Default::default()
             },
             vk::DescriptorSetLayoutBinding {
@@ -611,6 +611,7 @@ fn main() {
 
             let viewport = Viewport::from_vertical_fov(swapchain.extent, std::f32::consts::FRAC_PI_2);
             uniforms.projection = viewport.projection(1e-2);
+            uniforms.view = na::convert(camera.inverse());
             let view = camera.inverse();
             let (instances, transfers) = cache.update(planet.radius(), &view);
 
@@ -739,6 +740,7 @@ fn main() {
 #[repr(C)]
 struct Uniforms {
     projection: na::Projective3<f32>,
+    view: na::Projective3<f32>,
 }
 
 struct Viewport {

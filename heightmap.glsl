@@ -6,6 +6,10 @@ struct Vertex {
     vec3 position;
     // Position of the vertex within the chunk
     vec2 texcoords;
+    // Unit vector away from the center of the sphere
+    vec3 normal;
+    // Unit vector perpendicular to normal
+    vec3 tangent;
 };
 
 struct Chunk {
@@ -55,10 +59,12 @@ Vertex chunk_vertex(uint quads, float radius, sampler2DArray heightmaps, Chunk c
     float height = texture(heightmaps, vec3(texcoords, chunk.slot)).x;
 
     vec3 local_normal = unit_to_sphere(chunk, texcoords);
-
+    
     Vertex result;
     result.position = (radius * local_normal - chunk.origin) + height * local_normal;
     result.texcoords = texcoords;
+    result.normal = local_normal;
+    result.tangent = cross(local_normal, vec3(0, 1, 0));
     
     return result;
 }
