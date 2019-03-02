@@ -17,7 +17,23 @@ ash = { version = "0.27.1", optional = true }
 [dev-dependencies]
 winit = "0.18.1"
 criterion = "0.2.10"
+vk-shader-macros = "0.1"
+memoffset = "0.2.1"
+half = "1.3.0"
+noise = "0.5.1"
 
 [[bench]]
 name = "bench"
 harness = false
+
+[[example]]
+name = "demo"
+required-features = ["ash"]
+
+[target.'cfg(windows)'.dev-dependencies]
+winapi = { version = "0.3.4", features = ["windef", "winuser"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+metal-rs = "0.6"
+cocoa = "0.13"
+objc = "0.2.2"
