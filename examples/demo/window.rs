@@ -519,7 +519,7 @@ impl SwapchainState {
             let device_memory_properties = base.instance.get_physical_device_memory_properties(base.pdevice);
             let depth_image_create_info = vk::ImageCreateInfo::builder()
                 .image_type(vk::ImageType::TYPE_2D)
-                .format(vk::Format::D16_UNORM)
+                .format(vk::Format::D32_SFLOAT)
                 .extent(vk::Extent3D {
                     width: extent.width,
                     height: extent.height,
