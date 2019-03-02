@@ -39,7 +39,7 @@ vec3 unit_to_sphere(Chunk chunk, vec2 unit) {
 
 // Computes geometry for a chunk, based on the gl_VertexIndex global. No vertex buffers necessary.
 //
-// quads: number of quads in a chunk. Must be a power of two for stitching to work.
+// quads: number of quads along one edge of a chunk. Must be a power of two for stitching to work.
 // radius: radius of the planet
 // heightmaps: array of heightmap cache slots
 // chunk: chunk to generate geometry for
