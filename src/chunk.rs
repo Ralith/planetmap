@@ -1,5 +1,5 @@
-use std::{fmt, mem};
 use std::ops::Neg;
+use std::{fmt, mem};
 
 use na::Real;
 
@@ -168,9 +168,15 @@ impl Chunk {
     /// By computing the worldview matrix with double precision and rounding down, this allows
     /// vertices on a chunk to be efficiently and seamlessly computed by a GPU for planet-sized
     /// spheres.
-    pub fn worldview(&self, sphere_radius: f64, view: &na::IsometryMatrix3<f64>) -> (na::Point3<f32>, na::IsometryMatrix3<f32>) {
-        let origin = na::convert::<_, na::Vector3<f32>>(sphere_radius * self.origin_on_face().into_inner());
-        let world = self.face.basis() * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
+    pub fn worldview(
+        &self,
+        sphere_radius: f64,
+        view: &na::IsometryMatrix3<f64>,
+    ) -> (na::Point3<f32>, na::IsometryMatrix3<f32>) {
+        let origin =
+            na::convert::<_, na::Vector3<f32>>(sphere_radius * self.origin_on_face().into_inner());
+        let world =
+            self.face.basis() * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
         (na::Point3::from(origin), na::convert(view * world))
     }
 }
@@ -528,7 +534,10 @@ mod test {
 
     #[test]
     fn sample_sanity() {
-        assert_eq!(Chunk::root(Face::PZ).samples(1).next().unwrap(), na::Vector3::z_axis());
+        assert_eq!(
+            Chunk::root(Face::PZ).samples(1).next().unwrap(),
+            na::Vector3::z_axis()
+        );
 
         let chunk = Chunk::root(Face::PZ).children()[1];
         assert!(chunk.samples(2).any(|x| x == na::Vector3::z_axis()));
@@ -569,7 +578,16 @@ mod test {
         };
         let children = chunk.children();
         let neighbor = chunk.neighbors()[0];
-        assert_eq!(children[0].samples(5).map(|child_vert| neighbor.samples(5).filter(|&neighbor_vert| neighbor_vert == child_vert).count()).sum::<usize>(), 3);
+        assert_eq!(
+            children[0]
+                .samples(5)
+                .map(|child_vert| neighbor
+                    .samples(5)
+                    .filter(|&neighbor_vert| neighbor_vert == child_vert)
+                    .count())
+                .sum::<usize>(),
+            3
+        );
     }
 
     #[test]

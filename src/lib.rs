@@ -4,5 +4,5 @@ pub use cubemap::CubeMap;
 pub mod chunk;
 pub use chunk::Chunk;
 
-mod cache;
+pub mod cache;
 pub use cache::Manager as CacheManager;

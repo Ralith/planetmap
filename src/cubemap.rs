@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
-use std::{iter, vec};
 use std::ops::{Index, IndexMut};
+use std::{iter, vec};
 
 use crate::chunk::Face;
 
@@ -53,13 +53,15 @@ impl<T> CubeMap<T> {
     pub fn from_fn(resolution: usize, mut f: impl FnMut(na::Unit<na::Vector3<f32>>) -> T) -> Self {
         Self {
             resolution,
-            data: (0 .. resolution * resolution * 6)
+            data: (0..resolution * resolution * 6)
                 .map(|index| f(get_dir(resolution, index).unwrap()))
-                .collect()
+                .collect(),
         }
     }
 
-    pub fn resolution(&self) -> usize { self.resolution }
+    pub fn resolution(&self) -> usize {
+        self.resolution
+    }
 
     pub fn iter(&self) -> Iter<T> {
         self.into_iter()
@@ -68,7 +70,6 @@ impl<T> CubeMap<T> {
     pub fn iter_mut(&mut self) -> IterMut<T> {
         self.into_iter()
     }
-
 }
 
 impl<T> AsRef<[T]> for CubeMap<T> {
@@ -132,7 +133,10 @@ fn coords(x: &na::Unit<na::Vector3<f32>>) -> (Face, na::Vector2<f32>) {
         .unwrap();
     let face = if value < 0.0 { -axis } else { axis };
     let wrt_face = face.basis().inverse() * x;
-    (face, na::Vector2::new(wrt_face.x, wrt_face.y) * (0.5 / value) + na::Vector2::new(0.5, 0.5))
+    (
+        face,
+        na::Vector2::new(wrt_face.x, wrt_face.y) * (0.5 / value) + na::Vector2::new(0.5, 0.5),
+    )
 }
 
 impl<T> IntoIterator for CubeMap<T> {
@@ -140,7 +144,11 @@ impl<T> IntoIterator for CubeMap<T> {
     type IntoIter = IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter { resolution: self.resolution, data: self.data.into_vec().into_iter(), index: 0 }
+        IntoIter {
+            resolution: self.resolution,
+            data: self.data.into_vec().into_iter(),
+            index: 0,
+        }
     }
 }
 
@@ -178,7 +186,11 @@ impl<'a, T> IntoIterator for &'a CubeMap<T> {
     type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Iter { resolution: self.resolution, data: &self.data, index: 0 }
+        Iter {
+            resolution: self.resolution,
+            data: &self.data,
+            index: 0,
+        }
     }
 }
 
@@ -216,7 +228,11 @@ impl<'a, T> IntoIterator for &'a mut CubeMap<T> {
     type IntoIter = IterMut<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IterMut { resolution: self.resolution, data: &mut self.data, index: 0 }
+        IterMut {
+            resolution: self.resolution,
+            data: &mut self.data,
+            index: 0,
+        }
     }
 }
 
@@ -252,7 +268,9 @@ impl<T> ExactSizeIterator for IterMut<'_, T> {
 
 fn get_dir(resolution: usize, index: usize) -> Option<na::Unit<na::Vector3<f32>>> {
     let face_size = resolution * resolution;
-    if index >= face_size * 6 { return None; }
+    if index >= face_size * 6 {
+        return None;
+    }
     let face = [Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ][index / face_size];
     let rem = index % face_size;
     let texcoord = if resolution == 1 {
@@ -278,12 +296,30 @@ mod test {
 
     #[test]
     fn coord_sanity() {
-        assert_eq!(coords(&na::Vector3::x_axis()), (Face::PX, na::Vector2::new(0.5, 0.5)));
-        assert_eq!(coords(&na::Vector3::y_axis()), (Face::PY, na::Vector2::new(0.5, 0.5)));
-        assert_eq!(coords(&na::Vector3::z_axis()), (Face::PZ, na::Vector2::new(0.5, 0.5)));
-        assert_eq!(coords(&-na::Vector3::x_axis()), (Face::NX, na::Vector2::new(0.5, 0.5)));
-        assert_eq!(coords(&-na::Vector3::y_axis()), (Face::NY, na::Vector2::new(0.5, 0.5)));
-        assert_eq!(coords(&-na::Vector3::z_axis()), (Face::NZ, na::Vector2::new(0.5, 0.5)));
+        assert_eq!(
+            coords(&na::Vector3::x_axis()),
+            (Face::PX, na::Vector2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            coords(&na::Vector3::y_axis()),
+            (Face::PY, na::Vector2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            coords(&na::Vector3::z_axis()),
+            (Face::PZ, na::Vector2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            coords(&-na::Vector3::x_axis()),
+            (Face::NX, na::Vector2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            coords(&-na::Vector3::y_axis()),
+            (Face::NY, na::Vector2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            coords(&-na::Vector3::z_axis()),
+            (Face::NZ, na::Vector2::new(0.5, 0.5))
+        );
     }
 
     #[test]
@@ -308,11 +344,14 @@ mod test {
     fn addressing_roundtrip() {
         const RES: usize = 2049; // must be odd for there to be a point exactly on the axes
         for dir in &[
-            na::Vector3::x_axis(), na::Vector3::y_axis(), na::Vector3::z_axis(),
-            -na::Vector3::x_axis(), -na::Vector3::y_axis(), -na::Vector3::z_axis(),
+            na::Vector3::x_axis(),
+            na::Vector3::y_axis(),
+            na::Vector3::z_axis(),
+            -na::Vector3::x_axis(),
+            -na::Vector3::y_axis(),
+            -na::Vector3::z_axis(),
             na::Unit::new_normalize(na::Vector3::new(1.0, 1.0, 1.0)),
-        ]
-        {
+        ] {
             let index = index(RES, &dir);
             let out = get_dir(RES, index).unwrap();
             assert_eq!(dir, &out);
