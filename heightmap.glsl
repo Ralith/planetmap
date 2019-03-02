@@ -33,19 +33,24 @@ vec3 unit_to_sphere(Chunk chunk, vec2 unit) {
     return normalize(vec3((chunk.coords + unit) * side_length - 1.0, 1.0));
 }
 
-Vertex chunk_vertex(uint resolution, float radius, sampler2DArray heightmaps, Chunk chunk) {
-    uint max_coord = resolution - 1;
+// Computes geometry for a chunk, based on the gl_VertexIndex global. No vertex buffers necessary.
+//
+// quads: number of quads in a chunk. Must be a power of two for stitching to work.
+// radius: radius of the planet
+// heightmaps: array of heightmap cache slots
+// chunk: chunk to generate geometry for
+Vertex chunk_vertex(uint quads, float radius, sampler2DArray heightmaps, Chunk chunk) {
     int quad_id = gl_VertexIndex / 6;
     // Integer vertex
-    uvec2 quad_coord = (quad[gl_VertexIndex % 6] + uvec2(quad_id % resolution, quad_id / resolution));
+    uvec2 quad_coord = (quad[gl_VertexIndex % 6] + uvec2(quad_id % quads, quad_id / quads));
 
     uvec4 neighborhood = uvec4(chunk.neighborhood >> 24, (chunk.neighborhood >> 16) & 0xFF, (chunk.neighborhood >> 8) & 0xFF, chunk.neighborhood & 0xFF);
 
     // Make some edges degenerate to line up with lower neighboring LoDs
-    quad_coord.x &= (-1 << uint(quad_coord.y == 0) * neighborhood.y) & (-1 << uint(quad_coord.y == max_coord) * neighborhood.w);
-    quad_coord.y &= (-1 << uint(quad_coord.x == 0) * neighborhood.x) & (-1 << uint(quad_coord.x == max_coord) * neighborhood.z);
+    quad_coord.x &= (-1 << uint(quad_coord.y == 0) * neighborhood.y) & (-1 << uint(quad_coord.y == quads) * neighborhood.w);
+    quad_coord.y &= (-1 << uint(quad_coord.x == 0) * neighborhood.x) & (-1 << uint(quad_coord.x == quads) * neighborhood.z);
 
-    vec2 texcoords = vec2(quad_coord) / max_coord;
+    vec2 texcoords = vec2(quad_coord) / quads;
 
     float height = texture(heightmaps, vec3(texcoords, chunk.slot)).x;
 
