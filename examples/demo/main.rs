@@ -24,11 +24,10 @@ const CHUNK_SIZE: u32 = 17;
 const CHUNK_QUADS: u32 = CHUNK_SIZE - 1;
 /// Amount of CPU-side staging memory to allocate for originating transfers
 const STAGING_BUFFER_LENGTH: u32 = 256;
-const STAGING_SLOT_SIZE: u32 = least_greater_multiple(CHUNK_SIZE * CHUNK_SIZE * 2, 4);
 
 fn main() {
     unsafe {
-        let mut base = ExampleBase::new(1920, 1080);
+        let mut base = ExampleBase::new(512, 512);
         let planet = Planet::new();
 
         let mut cache = planetmap::ash::Cache::new(
@@ -144,7 +143,7 @@ fn main() {
 
         
         let staging_buffer_info = vk::BufferCreateInfo {
-            size: (STAGING_SLOT_SIZE * STAGING_BUFFER_LENGTH) as u64,
+            size: (STAGED_CHUNK_SIZE * STAGING_BUFFER_LENGTH) as u64,
             usage: vk::BufferUsageFlags::TRANSFER_SRC,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
@@ -178,7 +177,7 @@ fn main() {
                 staging_buffer_memory_req.size,
                 vk::MemoryMapFlags::empty(),
             )
-            .unwrap() as *mut [u8; STAGING_SLOT_SIZE as usize];
+            .unwrap() as *mut [u8; STAGED_CHUNK_SIZE as usize];
         base.device
             .bind_buffer_memory(staging_buffer, staging_buffer_memory, 0)
             .unwrap();
@@ -627,17 +626,18 @@ fn main() {
                     if !transfers.is_empty() {
                         let base = staging.as_ptr() as usize;
                         for (stage, chunk) in staging.iter_mut().zip(transfers) {
-                            let stage = stage.as_ptr() as *mut [f16; (CHUNK_SIZE * CHUNK_SIZE) as usize];
+                            let stage = stage.as_ptr() as *mut StagedChunk;
                             let slot = cache.allocate(chunk).unwrap();
                             for (i, sample) in chunk.samples(CHUNK_SIZE).enumerate() {
-                                (*stage)[i] = f16::from_f64(planet.height_at(&sample));
+                                (*stage).heights[i] = f16::from_f64(planet.height_at(&sample));
                             }
+                            let offset = stage as usize - base;
                             engine.transfer(
                                 cmd,
                                 planetmap::ash::TransferSource {
                                     texture: 0,
                                     buffer: staging_buffer,
-                                    offset: ((*stage).as_ptr() as usize - base) as vk::DeviceSize,
+                                    offset: (offset + offset_of!(StagedChunk, heights)) as vk::DeviceSize,
                                     row_length: 0,
                                     image_height: 0,
                                 },
@@ -749,6 +749,13 @@ struct Viewport {
     bottom: f32,
     top: f32,
 }
+
+#[repr(C)]
+struct StagedChunk {
+    heights: [f16; (CHUNK_SIZE * CHUNK_SIZE) as usize],
+}
+
+const STAGED_CHUNK_SIZE: u32 = least_greater_multiple(mem::size_of::<StagedChunk>() as u32, 4);
 
 struct Specialization {
     quad_count: u32,
