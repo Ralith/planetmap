@@ -493,7 +493,7 @@ fn main() {
         let mut swapchain = SwapchainState::new(&base, renderpass, None);
 
         let mut camera = na::IsometryMatrix3::from_parts(
-            na::Translation3::from(na::Vector3::new(0.0, planet.radius() * 1.01, 0.0)),
+            na::Translation3::from(na::Vector3::new(0.0, planet.radius() + 1e4, 0.0)),
             na::Rotation3::identity(),
         );
 
