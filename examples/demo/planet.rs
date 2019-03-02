@@ -19,6 +19,10 @@ impl Planet {
         self.noise.get(point) * 4000.0
     }
 
+    pub fn normal_at(&self, _: &na::Unit<na::Vector3<f64>>) -> na::Unit<na::Vector3<f32>> {
+        na::Vector3::z_axis()
+    }
+
     pub fn radius(&self) -> f64 {
         self.radius
     }

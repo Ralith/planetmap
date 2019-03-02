@@ -19,9 +19,10 @@ const VERT: &[u32] = include_glsl!("examples/demo/terrain.vert", debug);
 const FRAG: &[u32] = include_glsl!("examples/demo/terrain.frag", debug);
 
 /// Number of samples along one edge of a chunk. Must be at least 2.
-const CHUNK_SIZE: u32 = 17;
+const CHUNK_HEIGHT_SIZE: u32 = 17;
 /// Number of quads along one edge of a chunk. Must be a power of two for stitching to work.
-const CHUNK_QUADS: u32 = CHUNK_SIZE - 1;
+const CHUNK_QUADS: u32 = CHUNK_HEIGHT_SIZE - 1;
+const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 2;
 /// Amount of CPU-side staging memory to allocate for originating transfers
 const STAGING_BUFFER_LENGTH: u32 = 256;
 
@@ -37,14 +38,24 @@ fn main() {
             planetmap::cache::Config {
                 max_depth: 12,
             },
-            &[planetmap::ash::TextureKind {
-                format: vk::Format::R16_SFLOAT,
-                extent: vk::Extent2D {
-                    width: CHUNK_SIZE,
-                    height: CHUNK_SIZE,
+            &[
+                planetmap::ash::TextureKind {
+                    format: vk::Format::R16_SFLOAT,
+                    extent: vk::Extent2D {
+                        width: CHUNK_HEIGHT_SIZE,
+                        height: CHUNK_HEIGHT_SIZE,
+                    },
+                    stages: vk::PipelineStageFlags::VERTEX_SHADER,
                 },
-                stages: vk::PipelineStageFlags::VERTEX_SHADER,
-            }],
+                planetmap::ash::TextureKind {
+                    format: vk::Format::R8G8_SNORM,
+                    extent: vk::Extent2D {
+                        width: CHUNK_NORMALS_SIZE,
+                        height: CHUNK_NORMALS_SIZE,
+                    },
+                    stages: vk::PipelineStageFlags::FRAGMENT_SHADER,
+                },
+            ],
             base.queue_family_index,
         );
         let engine = cache.transfer_engine(base.queue_family_index);
@@ -205,7 +216,7 @@ fn main() {
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: cache.array_count(),
+                descriptor_count: cache.array_count() * 2,
             },
         ];
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
@@ -234,6 +245,14 @@ fn main() {
                 p_immutable_samplers: samplers.as_ptr(),
                 ..Default::default()
             },
+            vk::DescriptorSetLayoutBinding {
+                binding: 2,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: cache.array_count(),
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                p_immutable_samplers: samplers.as_ptr(),
+                ..Default::default()
+            },
         ];
 
         let desc_set_layouts = [base
@@ -251,6 +270,8 @@ fn main() {
             .device
             .allocate_descriptor_sets(&desc_alloc_info)
             .unwrap().into_iter().next().unwrap();
+
+        let mut cache_views = cache.array_views();
 
         base.device.update_descriptor_sets(
             &[
@@ -271,8 +292,24 @@ fn main() {
                     dst_binding: 1,
                     descriptor_count: cache.array_count(),
                     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    p_image_info: cache
-                        .array_views()
+                    p_image_info: cache_views
+                        .next()
+                        .unwrap()
+                        .map(|x| vk::DescriptorImageInfo {
+                            sampler: vk::Sampler::null(),
+                            image_view: x,
+                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        })
+                        .collect::<Vec<_>>()[..]
+                        .as_ptr(),
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_set,
+                    dst_binding: 2,
+                    descriptor_count: cache.array_count(),
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    p_image_info: cache_views
                         .next()
                         .unwrap()
                         .map(|x| vk::DescriptorImageInfo {
@@ -287,6 +324,7 @@ fn main() {
             ],
             &[],
         );
+        mem::drop(cache_views);
 
         let vertex_shader_info = vk::ShaderModuleCreateInfo::builder().code(&VERT);
         let frag_shader_info = vk::ShaderModuleCreateInfo::builder().code(&FRAG);
@@ -416,6 +454,38 @@ fn main() {
         let dynamic_state_info =
             vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_state);
 
+        let specialization = mem::transmute::<_, [u8; 16]>(Specialization {
+            quad_count: CHUNK_QUADS,
+            heightmap_array_size: cache.array_size(),
+            heightmap_array_count: cache.array_count(),
+            radius: planet.radius() as f32,
+        });
+        let specialization_map = [
+            vk::SpecializationMapEntry {
+                constant_id: 0,
+                offset: offset_of!(Specialization, quad_count) as u32,
+                size: 4,
+            },
+            vk::SpecializationMapEntry {
+                constant_id: 1,
+                offset: offset_of!(Specialization, heightmap_array_size) as u32,
+                size: 4,
+            },
+            vk::SpecializationMapEntry {
+                constant_id: 2,
+                offset: offset_of!(Specialization, heightmap_array_count) as u32,
+                size: 4,
+            },
+            vk::SpecializationMapEntry {
+                constant_id: 3,
+                offset: offset_of!(Specialization, radius) as u32,
+                size: 4,
+            }
+        ];
+        let specialization_info = vk::SpecializationInfo::builder()
+            .data(&specialization)
+            .map_entries(&specialization_map);
+
         let shader_entry_name = CStr::from_bytes_with_nul(b"main\0").unwrap();
         let graphics_pipeline = base
             .device
@@ -428,41 +498,14 @@ fn main() {
                                 module: vertex_shader_module,
                                 p_name: shader_entry_name.as_ptr(),
                                 stage: vk::ShaderStageFlags::VERTEX,
-                                p_specialization_info: &*vk::SpecializationInfo::builder()
-                                    .data(&mem::transmute::<_, [u8; 16]>(Specialization {
-                                        quad_count: CHUNK_QUADS,
-                                        heightmap_array_size: cache.array_size(),
-                                        heightmap_array_count: cache.array_count(),
-                                        radius: planet.radius() as f32,
-                                    }))
-                                    .map_entries(&[
-                                        vk::SpecializationMapEntry {
-                                            constant_id: 0,
-                                            offset: offset_of!(Specialization, quad_count) as u32,
-                                            size: 4,
-                                        },
-                                        vk::SpecializationMapEntry {
-                                            constant_id: 1,
-                                            offset: offset_of!(Specialization, heightmap_array_size) as u32,
-                                            size: 4,
-                                        },
-                                        vk::SpecializationMapEntry {
-                                            constant_id: 2,
-                                            offset: offset_of!(Specialization, heightmap_array_count) as u32,
-                                            size: 4,
-                                        },
-                                        vk::SpecializationMapEntry {
-                                            constant_id: 3,
-                                            offset: offset_of!(Specialization, radius) as u32,
-                                            size: 4,
-                                        }
-                                    ]),
+                                p_specialization_info: &*specialization_info,
                                 ..Default::default()
                             },
                             vk::PipelineShaderStageCreateInfo {
                                 module: fragment_shader_module,
                                 p_name: shader_entry_name.as_ptr(),
                                 stage: vk::ShaderStageFlags::FRAGMENT,
+                                p_specialization_info: &*specialization_info,
                                 ..Default::default()
                             },
                         ])
@@ -628,8 +671,11 @@ fn main() {
                         for (stage, chunk) in staging.iter_mut().zip(transfers) {
                             let stage = stage.as_ptr() as *mut StagedChunk;
                             let slot = cache.allocate(chunk).unwrap();
-                            for (i, sample) in chunk.samples(CHUNK_SIZE).enumerate() {
+                            for (i, sample) in chunk.samples(CHUNK_HEIGHT_SIZE).enumerate() {
                                 (*stage).heights[i] = f16::from_f64(planet.height_at(&sample));
+                            }
+                            for (i, sample) in chunk.samples(CHUNK_NORMALS_SIZE).enumerate() {
+                                (*stage).normals[i] = pack_normal(&planet.normal_at(&sample));
                             }
                             let offset = stage as usize - base;
                             engine.transfer(
@@ -638,6 +684,17 @@ fn main() {
                                     texture: 0,
                                     buffer: staging_buffer,
                                     offset: (offset + offset_of!(StagedChunk, heights)) as vk::DeviceSize,
+                                    row_length: 0,
+                                    image_height: 0,
+                                },
+                                slot,
+                            );
+                            engine.transfer(
+                                cmd,
+                                planetmap::ash::TransferSource {
+                                    texture: 1,
+                                    buffer: staging_buffer,
+                                    offset: (offset + offset_of!(StagedChunk, normals)) as vk::DeviceSize,
                                     row_length: 0,
                                     image_height: 0,
                                 },
@@ -752,7 +809,9 @@ struct Viewport {
 
 #[repr(C)]
 struct StagedChunk {
-    heights: [f16; (CHUNK_SIZE * CHUNK_SIZE) as usize],
+    heights: [f16; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE) as usize],
+    _padding: [u8; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE * 2) as usize % 4],
+    normals: [[i8; 2]; (CHUNK_NORMALS_SIZE * CHUNK_NORMALS_SIZE) as usize],
 }
 
 const STAGED_CHUNK_SIZE: u32 = least_greater_multiple(mem::size_of::<StagedChunk>() as u32, 4);
@@ -794,4 +853,8 @@ impl Viewport {
 /// Compute smallest multiple of `factor` which is >= `x`
 const fn least_greater_multiple(x: u32, factor: u32) -> u32 {
     x + (factor - x % factor)
+}
+
+fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 2] {
+    [(normal.x * 127.0) as i8, (normal.y * 127.0) as i8]
 }

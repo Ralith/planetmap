@@ -14,6 +14,7 @@ layout(location = 6) in uint neighborhood;
 layout(location = 0) out vec2 texcoords;
 layout(location = 1) out vec3 normal;
 layout(location = 2) out vec3 tangent;
+layout(location = 3) out uint slot_out;
 
 void main() {
     Chunk chunk;
@@ -27,4 +28,5 @@ void main() {
     texcoords = vert.texcoords;
     normal = mat3(worldview) * vert.normal;
     tangent = mat3(worldview) * vert.tangent;
+    slot_out = slot;
 }
