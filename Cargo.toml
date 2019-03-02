@@ -5,14 +5,17 @@ authors = ["Benjamin Saunders <ben.e.saunders@gmail.com>"]
 edition = "2018"
 readme = "README.md"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 na = { package = "nalgebra", version = "0.17.2" }
 slab = "0.4.2"
 fxhash = "0.2"
+ash = { version = "0.27.1", optional = true }
 
 [dev-dependencies]
 winit = "0.18.1"
-ash = "0.27.1"
 criterion = "0.2.10"
 
 [[bench]]

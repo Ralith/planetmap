@@ -6,3 +6,6 @@ pub use chunk::Chunk;
 
 pub mod cache;
 pub use cache::Manager as CacheManager;
+
+#[cfg(feature = "ash")]
+pub mod ash;
