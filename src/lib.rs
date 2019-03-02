@@ -1,3 +1,6 @@
+mod cubemap;
+pub use cubemap::CubeMap;
+
 pub mod chunk;
 pub use chunk::Chunk;
 
