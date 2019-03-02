@@ -20,9 +20,30 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            max_depth: 12,
+        Self { max_depth: 12 }
+    }
+}
+
+impl Config {
+    /// Number of slots needed by this config to represent maximum detail for a worst-case viewpoint
+    pub fn slots_needed(&self) -> usize {
+        chunk::Face::iter()
+            .map(Chunk::root)
+            .map(|x| self.slots_needed_inner(&x))
+            .sum()
+    }
+
+    fn slots_needed_inner(&self, chunk: &Chunk) -> usize {
+        let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
+        if chunk.depth == self.max_depth || !needs_subdivision(&chunk, &viewpoint) {
+            return 1;
         }
+        chunk
+            .children()
+            .iter()
+            .map(|x| self.slots_needed_inner(x))
+            .sum::<usize>()
+            + 1
     }
 }
 
@@ -300,5 +321,17 @@ mod test {
         let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
         assert_eq!(state.transfer.len(), 0);
         assert_ne!(state.render.len(), 0);
+    }
+
+    #[test]
+    fn slots_needed() {
+        let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
+        for max_depth in 0..12 {
+            let config = Config { max_depth };
+            let needed = config.slots_needed();
+            let mut mgr = Manager::new(2048, config);
+            let state = mgr.update(&[viewpoint]);
+            assert_eq!(state.transfer.len(), needed);
+        }
     }
 }
