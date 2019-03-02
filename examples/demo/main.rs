@@ -247,15 +247,15 @@ fn main() {
         let desc_alloc_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(descriptor_pool)
             .set_layouts(&desc_set_layouts);
-        let descriptor_sets = base
+        let descriptor_set = base
             .device
             .allocate_descriptor_sets(&desc_alloc_info)
-            .unwrap();
+            .unwrap().into_iter().next().unwrap();
 
         base.device.update_descriptor_sets(
             &[
                 vk::WriteDescriptorSet {
-                    dst_set: descriptor_sets[0],
+                    dst_set: descriptor_set,
                     dst_binding: 0,
                     descriptor_count: 1,
                     descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
@@ -267,7 +267,7 @@ fn main() {
                     ..Default::default()
                 },
                 vk::WriteDescriptorSet {
-                    dst_set: descriptor_sets[0],
+                    dst_set: descriptor_set,
                     dst_binding: 1,
                     descriptor_count: cache.array_count(),
                     descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -663,7 +663,7 @@ fn main() {
                         vk::PipelineBindPoint::GRAPHICS,
                         pipeline_layout,
                         0,
-                        &descriptor_sets[..],
+                        &[descriptor_set],
                         &[],
                     );
                     device.cmd_bind_pipeline(
