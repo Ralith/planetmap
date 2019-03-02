@@ -3,7 +3,6 @@ mod planet;
 
 use std::ffi::CStr;
 use std::{mem, slice};
-use std::sync::Arc;
 use std::time::Instant;
 
 use ash::vk;
@@ -35,7 +34,7 @@ fn main() {
         let mut cache = planetmap::ash::Cache::new(
             &base.instance,
             base.pdevice,
-            Arc::new(base.device.clone()),
+            base.device.clone(),
             planetmap::cache::Config {
                 max_depth: 12,
             },
@@ -64,7 +63,7 @@ fn main() {
                 format: vk::Format::D16_UNORM,
                 samples: vk::SampleCountFlags::TYPE_1,
                 load_op: vk::AttachmentLoadOp::CLEAR,
-                initial_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                initial_layout: vk::ImageLayout::UNDEFINED,
                 final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 ..Default::default()
             },
@@ -101,24 +100,6 @@ fn main() {
             .device
             .create_render_pass(&renderpass_create_info, None)
             .unwrap();
-
-        let framebuffers: Vec<vk::Framebuffer> = base
-            .present_image_views
-            .iter()
-            .map(|&present_image_view| {
-                let framebuffer_attachments = [present_image_view, base.depth_image_view];
-                let frame_buffer_create_info = vk::FramebufferCreateInfo::builder()
-                    .render_pass(renderpass)
-                    .attachments(&framebuffer_attachments)
-                    .width(base.surface_resolution.width)
-                    .height(base.surface_resolution.height)
-                    .layers(1);
-
-                base.device
-                    .create_framebuffer(&frame_buffer_create_info, None)
-                    .unwrap()
-            })
-            .collect();
 
         let uniform_buffer_info = vk::BufferCreateInfo {
             size: mem::size_of::<Uniforms>() as u64,
@@ -391,21 +372,6 @@ fn main() {
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
             ..Default::default()
         };
-        let viewports = [vk::Viewport {
-            x: 0.0,
-            y: 0.0,
-            width: base.surface_resolution.width as f32,
-            height: base.surface_resolution.height as f32,
-            min_depth: 0.0,
-            max_depth: 1.0,
-        }];
-        let scissors = [vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: base.surface_resolution.clone(),
-        }];
-        let viewport_state_info = vk::PipelineViewportStateCreateInfo::builder()
-            .scissors(&scissors)
-            .viewports(&viewports);
 
         let rasterization_info = vk::PipelineRasterizationStateCreateInfo {
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -503,7 +469,11 @@ fn main() {
                         ])
                         .vertex_input_state(&vertex_input_state_info)
                         .input_assembly_state(&vertex_input_assembly_state_info)
-                        .viewport_state(&viewport_state_info)
+                        .viewport_state(&vk::PipelineViewportStateCreateInfo {
+                            scissor_count: 1,
+                            viewport_count: 1,
+                            ..Default::default()
+                        })
                         .rasterization_state(&rasterization_info)
                         .multisample_state(&multisample_state_info)
                         .depth_stencil_state(&depth_state_info)
@@ -519,6 +489,8 @@ fn main() {
             .into_iter()
             .next()
             .unwrap();
+
+        let mut swapchain = SwapchainState::new(&base, renderpass, None);
 
         let mut camera = na::IsometryMatrix3::from_parts(
             na::Translation3::from(na::Vector3::new(0.0, planet.radius() * 1.01, 0.0)),
@@ -586,15 +558,21 @@ fn main() {
             let speed = altitude;
             camera = camera * na::Translation3::from(motion * dt * if speed > 1e8 { 1e8 } else { speed });
 
-            let (present_index, _) = base
-                .swapchain_loader
-                .acquire_next_image(
-                    base.swapchain,
-                    std::u64::MAX,
-                    base.present_complete_semaphore,
-                    vk::Fence::null(),
-                )
-                .unwrap();
+            let swapchain_suboptimal;
+            let present_index = loop {
+                match swapchain.acquire_next_image(base.present_complete_semaphore) {
+                    Ok((idx, suboptimal)) => {
+                        swapchain_suboptimal = suboptimal;
+                        break idx;
+                    }
+                    Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                        swapchain = SwapchainState::new(&base, renderpass, Some(swapchain));
+                    }
+                    Err(e) => {
+                        panic!("{}", e);
+                    }
+                }
+            };
             let clear_values = [
                 vk::ClearValue {
                     color: vk::ClearColorValue {
@@ -609,23 +587,36 @@ fn main() {
                 },
             ];
 
+            let viewports = [vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: swapchain.extent.width as f32,
+                height: swapchain.extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            }];
+            let scissors = [vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: swapchain.extent,
+            }];
+
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(renderpass)
-                .framebuffer(framebuffers[present_index as usize])
+                .framebuffer(swapchain.frames[present_index as usize].buffer)
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: base.surface_resolution.clone(),
+                    extent: swapchain.extent,
                 })
                 .clear_values(&clear_values);
 
-            let viewport = Viewport::from_vertical_fov(base.surface_resolution, std::f32::consts::FRAC_PI_2);
+            let viewport = Viewport::from_vertical_fov(swapchain.extent, std::f32::consts::FRAC_PI_2);
             uniforms.projection = viewport.projection(1e-2);
             let view = camera.inverse();
             let (instances, transfers) = cache.update(planet.radius(), &view);
 
             let mut transfer_slots = Vec::new();
             record_submit_commandbuffer(
-                &base.device,
+                &*base.device,
                 base.draw_command_buffer,
                 base.present_queue,
                 &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
@@ -699,21 +690,29 @@ fn main() {
                     device.cmd_end_render_pass(cmd);
                 },
             );
+            
             // Commands complete, so is the transfer.
             for slot in transfer_slots.drain(..) {
                 cache.transferred(slot);
             }
-            let wait_semaphors = [base.rendering_complete_semaphore];
-            let swapchains = [base.swapchain];
-            let image_indices = [present_index];
-            let present_info = vk::PresentInfoKHR::builder()
-                .wait_semaphores(&wait_semaphors)
-                .swapchains(&swapchains)
-                .image_indices(&image_indices);
 
-            base.swapchain_loader
-                .queue_present(base.present_queue, &present_info)
-                .unwrap();
+            let out_of_date = match base.swapchain_loader
+                .queue_present(
+                    base.present_queue,
+                    &vk::PresentInfoKHR::builder()
+                        .wait_semaphores(&[base.rendering_complete_semaphore])
+                        .swapchains(&[swapchain.handle])
+                        .image_indices(&[present_index]))
+            {
+                Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => true,
+                Ok(false) => swapchain_suboptimal,
+                Err(e) => { panic!("{}", e) }
+            };
+            if out_of_date {
+                // Wait for present to finish
+                base.device.queue_wait_idle(base.present_queue).unwrap();
+                swapchain = SwapchainState::new(&base, renderpass, Some(swapchain));
+            }
         }
 
         base.device.device_wait_idle().unwrap();
@@ -733,9 +732,6 @@ fn main() {
         }
         base.device.destroy_descriptor_pool(descriptor_pool, None);
         base.device.destroy_sampler(sampler, None);
-        for framebuffer in framebuffers {
-            base.device.destroy_framebuffer(framebuffer, None);
-        }
         base.device.destroy_render_pass(renderpass, None);
     }
 }
