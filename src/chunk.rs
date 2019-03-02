@@ -1,4 +1,7 @@
 use std::{fmt, mem};
+use std::ops::Neg;
+
+use na::Real;
 
 /// A node of a quadtree on a particular cubemap face
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -155,7 +158,7 @@ impl Chunk {
         SampleIter {
             chunk: self,
             resolution,
-            next: (0, 0),
+            index: 0,
         }
     }
 
@@ -165,14 +168,14 @@ impl Chunk {
     /// By computing the worldview matrix with double precision and rounding down, this allows
     /// vertices on a chunk to be efficiently and seamlessly computed by a GPU for planet-sized
     /// spheres.
-    pub fn worldview(&self, view: &na::IsometryMatrix3<f64>, sphere_radius: f64) -> (na::Point3<f32>, na::IsometryMatrix3<f32>) {
+    pub fn worldview(&self, sphere_radius: f64, view: &na::IsometryMatrix3<f64>) -> (na::Point3<f32>, na::IsometryMatrix3<f32>) {
         let origin = na::convert::<_, na::Vector3<f32>>(sphere_radius * self.origin_on_face().into_inner());
         let world = self.face.basis() * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
         (na::Point3::from(origin), na::convert(view * world))
     }
 }
 
-/// Face of a cubemap, identified by direction
+/// Face of a cube map, identified by direction
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum Face {
@@ -205,9 +208,24 @@ impl fmt::Display for Face {
     }
 }
 
+impl Neg for Face {
+    type Output = Self;
+    fn neg(self) -> Self {
+        use self::Face::*;
+        match self {
+            PX => NX,
+            PY => NY,
+            PZ => NZ,
+            NX => PX,
+            NY => PY,
+            NZ => PZ,
+        }
+    }
+}
+
 impl Face {
     /// Transform from face space (facing +Z) to sphere space (facing the named axis).
-    pub fn basis(&self) -> na::Rotation3<f64> {
+    pub fn basis<N: Real>(&self) -> na::Rotation3<N> {
         use self::Face::*;
         let (x, y, z) = match *self {
             PX => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
@@ -217,7 +235,7 @@ impl Face {
             PZ => (na::Vector3::x(), na::Vector3::y(), na::Vector3::z()),
             NZ => (-na::Vector3::x(), na::Vector3::y(), -na::Vector3::z()),
         };
-        na::Rotation3::<f64>::from_matrix_unchecked(na::Matrix3::from_columns(&[x, y, z]))
+        na::Rotation3::from_matrix_unchecked(na::Matrix3::from_columns(&[x, y, z]))
     }
 
     /// Iterator over all `Face`s
@@ -231,7 +249,7 @@ impl Face {
     /// Returns the neighboring face, the edge of that face, and whether the axis shared with that face is parallel or antiparallel.
     ///
     /// Index by `sign << 1 | axis`.
-    pub fn neighbors(&self) -> &'static [(Face, Edge, bool); 4] {
+    fn neighbors(&self) -> &'static [(Face, Edge, bool); 4] {
         use self::Face::*;
         match *self {
             PX => &[
@@ -272,6 +290,12 @@ impl Face {
             ],
         }
     }
+
+    /// Compute the direction identified by a [0..1]^2 vector on this face
+    pub fn direction<N: Real>(&self, coords: &na::Vector2<N>) -> na::Unit<na::Vector3<N>> {
+        let dir_z = na::Unit::new_normalize(na::Vector3::new(coords.x, coords.y, N::one()));
+        self.basis() * dir_z
+    }
 }
 
 /// Boundary of a `Chunk`
@@ -291,7 +315,7 @@ impl Edge {
     }
 }
 
-impl ::std::ops::Neg for Edge {
+impl Neg for Edge {
     type Output = Self;
     fn neg(self) -> Self {
         use self::Edge::*;
@@ -308,47 +332,44 @@ impl ::std::ops::Neg for Edge {
 pub struct SampleIter {
     chunk: Chunk,
     resolution: u32,
-    next: (u32, u32),
-}
-
-impl SampleIter {
-    fn seq(&self) -> usize {
-        self.next.0 as usize + self.next.1 as usize * self.resolution as usize
-    }
+    index: u32,
 }
 
 impl Iterator for SampleIter {
     type Item = na::Unit<na::Vector3<f64>>;
     fn next(&mut self) -> Option<na::Unit<na::Vector3<f64>>> {
-        if self.seq() == self.resolution as usize * self.resolution as usize {
+        if self.index >= self.resolution * self.resolution {
             return None;
         }
         let edge_length = self.chunk.edge_length();
         let origin_on_face =
             na::Vector2::new(self.chunk.coords.0 as f64, self.chunk.coords.1 as f64) * edge_length
                 - na::Vector2::new(1.0, 1.0);
-        let step = self.chunk.edge_length() / (self.resolution - 1) as f64;
-        let pos_on_face =
-            origin_on_face + na::Vector2::new(self.next.0 as f64, self.next.1 as f64) * step;
-        let dir_z = na::Unit::new_normalize(na::Vector3::new(pos_on_face.x, pos_on_face.y, 1.0));
-        let dir = self.chunk.face.basis() * dir_z;
-        let x = self.next.0;
-        self.next.0 = (x + 1) % self.resolution;
-        self.next.1 += (x + 1) / self.resolution;
+        let max = self.resolution - 1;
+        let offset = if max == 0 {
+            na::Vector2::new(0.5, 0.5) * self.chunk.edge_length()
+        } else {
+            let step = self.chunk.edge_length() / max as f64;
+            let (x, y) = (self.index % self.resolution, self.index / self.resolution);
+            na::Vector2::new(x as f64, y as f64) * step
+        };
+        let pos_on_face = origin_on_face + offset;
+        let dir = self.chunk.face.direction(&pos_on_face);
+        self.index += 1;
         Some(dir)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let total = self.resolution as usize * self.resolution as usize;
-        let remaining = total - self.seq();
+        let total = self.resolution * self.resolution;
+        let remaining = (total - self.index) as usize;
         (remaining, Some(remaining))
     }
 }
 
 impl ExactSizeIterator for SampleIter {
     fn len(&self) -> usize {
-        let total = self.resolution as usize * self.resolution as usize;
-        total - self.seq()
+        let total = self.resolution * self.resolution;
+        (total - self.index) as usize
     }
 }
 
@@ -507,6 +528,8 @@ mod test {
 
     #[test]
     fn sample_sanity() {
+        assert_eq!(Chunk::root(Face::PZ).samples(1).next().unwrap(), na::Vector3::z_axis());
+
         let chunk = Chunk::root(Face::PZ).children()[1];
         assert!(chunk.samples(2).any(|x| x == na::Vector3::z_axis()));
 
