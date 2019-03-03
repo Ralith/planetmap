@@ -4,7 +4,8 @@
 struct Vertex {
     // Position of the vertex relative to Chunk.origin
     vec3 position;
-    // Texture coordinates of the vertex, in [0, 1]
+    // Texture coordinates of the vertex, in [0, 1]. For seamless sampling, this must be adjusted
+    // for texel centers according to texture resolution.
     vec2 texcoords;
     // Unit vector away from the center of the sphere
     vec3 normal;
@@ -31,7 +32,8 @@ const uvec2 quad[6] = {
     {0, 0}, {1, 1}, {0, 1},
 };
 
-// Convert a point on a unit quad mapped to the current chunk into a point on the +Z surface of the unit sphere
+// Convert a point on a unit quad mapped to the current chunk into a point on the +Z surface of the
+// unit sphere
 vec3 unit_to_sphere(Chunk chunk, vec2 unit) {
     float side_length = 2.0 / pow(2, chunk.depth);
     return normalize(vec3((chunk.coords + unit) * side_length - 1.0, 1.0));
@@ -48,11 +50,14 @@ Vertex chunk_vertex(uint quads, float radius, sampler2DArray heightmaps, Chunk c
     // Integer vertex
     uvec2 quad_coord = (quad[gl_VertexIndex % 6] + uvec2(quad_id % quads, quad_id / quads));
 
-    uvec4 neighborhood = uvec4(chunk.neighborhood >> 24, (chunk.neighborhood >> 16) & 0xFF, (chunk.neighborhood >> 8) & 0xFF, chunk.neighborhood & 0xFF);
+    uvec4 neighborhood = uvec4(chunk.neighborhood >> 24, (chunk.neighborhood >> 16) & 0xFF,
+                               (chunk.neighborhood >> 8) & 0xFF, chunk.neighborhood & 0xFF);
 
     // Make some edges degenerate to line up with lower neighboring LoDs
-    quad_coord.x &= (-1 << uint(quad_coord.y == 0) * neighborhood.y) & (-1 << uint(quad_coord.y == quads) * neighborhood.w);
-    quad_coord.y &= (-1 << uint(quad_coord.x == 0) * neighborhood.x) & (-1 << uint(quad_coord.x == quads) * neighborhood.z);
+    quad_coord.x &= (-1 << uint(quad_coord.y == 0) * neighborhood.y)
+        & (-1 << uint(quad_coord.y == quads) * neighborhood.w);
+    quad_coord.y &= (-1 << uint(quad_coord.x == 0) * neighborhood.x)
+        & (-1 << uint(quad_coord.x == quads) * neighborhood.z);
 
     vec2 unit_coords = vec2(quad_coord) / quads; // 0..1
     float offset = 0.5 / (quads+1);              // Center of the first texel
