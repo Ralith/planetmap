@@ -2,12 +2,19 @@
 
 #include "terrain.h"
 
-layout(location = 0) in vec2 texcoords;
+layout(location = 0) in vec2 raw_texcoords;
 layout(location = 1) in vec3 base_normal;
 layout(location = 2) in vec3 tangent;
 layout(location = 3) in flat uint slot;
 
 layout(location = 0) out vec4 color;
+
+vec2 texcoords_for(sampler2DArray texture) {
+    float res = textureSize(texture, 0).x;
+    float offset = 0.5 / res;           // Center of the first texel
+    float range = 1.0 - (2.0 * offset); // Distance between centers of first and last texels
+    return raw_texcoords * range + offset;
+}
 
 void main() {
     vec3 base_normal_ = normalize(base_normal);
@@ -17,11 +24,11 @@ void main() {
 
     uint array = slot / CACHE_ARRAY_SIZE;
     uint layer = slot % CACHE_ARRAY_SIZE;
-    vec2 encoded = texture(normals[array], vec3(texcoords, layer)).xy;
+    vec2 encoded = texture(normals[array], vec3(texcoords_for(normals[array]), layer)).xy;
     vec3 decoded = vec3(encoded, sqrt(1-dot(encoded.xy, encoded.xy)));
     vec3 normal = tangent_basis * decoded;
 
-    vec4 base_color = texture(colors[array], vec3(texcoords, layer));
+    vec4 base_color = texture(colors[array], vec3(texcoords_for(colors[array]), layer));
 
     vec3 sun = mat3(view) * vec3(0, 1, 0);
     color = base_color * dot(normal, sun);
