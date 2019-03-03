@@ -230,6 +230,15 @@ impl Neg for Face {
 }
 
 impl Face {
+    /// Find the face that intersects a vector originating at the center of a cube
+    pub fn from_vector<N: Real + PartialOrd>(x: &na::Vector3<N>) -> Self {
+        let (&value, &axis) = x.iter()
+            .zip(&[Face::PX, Face::PY, Face::PZ])
+            .max_by(|(l, _), (r, _)| l.abs().partial_cmp(&r.abs()).unwrap_or(std::cmp::Ordering::Less))
+            .unwrap();
+        if value.is_sign_negative() { -axis } else { axis }
+    }
+
     /// Transform from face space (facing +Z) to sphere space (facing the named axis).
     pub fn basis<N: Real>(&self) -> na::Rotation3<N> {
         use self::Face::*;
