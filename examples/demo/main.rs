@@ -23,6 +23,7 @@ const CHUNK_HEIGHT_SIZE: u32 = 17;
 /// Number of quads along one edge of a chunk. Must be a power of two for stitching to work.
 const CHUNK_QUADS: u32 = CHUNK_HEIGHT_SIZE - 1;
 const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 2;
+const CHUNK_COLORS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 2;
 /// Amount of CPU-side staging memory to allocate for originating transfers
 const STAGING_BUFFER_LENGTH: u32 = 256;
 
@@ -52,6 +53,14 @@ fn main() {
                     extent: vk::Extent2D {
                         width: CHUNK_NORMALS_SIZE,
                         height: CHUNK_NORMALS_SIZE,
+                    },
+                    stages: vk::PipelineStageFlags::FRAGMENT_SHADER,
+                },
+                planetmap::ash::TextureKind {
+                    format: vk::Format::R8G8B8A8_SRGB,
+                    extent: vk::Extent2D {
+                        width: CHUNK_COLORS_SIZE,
+                        height: CHUNK_COLORS_SIZE,
                     },
                     stages: vk::PipelineStageFlags::FRAGMENT_SHADER,
                 },
@@ -216,7 +225,7 @@ fn main() {
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: cache.array_count() * 2,
+                descriptor_count: cache.array_count() * 3,
             },
         ];
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
@@ -247,6 +256,14 @@ fn main() {
             },
             vk::DescriptorSetLayoutBinding {
                 binding: 2,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: cache.array_count(),
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                p_immutable_samplers: samplers.as_ptr(),
+                ..Default::default()
+            },
+            vk::DescriptorSetLayoutBinding {
+                binding: 3,
                 descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 descriptor_count: cache.array_count(),
                 stage_flags: vk::ShaderStageFlags::FRAGMENT,
@@ -321,9 +338,27 @@ fn main() {
                         .as_ptr(),
                     ..Default::default()
                 },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_set,
+                    dst_binding: 3,
+                    descriptor_count: cache.array_count(),
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    p_image_info: cache_views
+                        .next()
+                        .unwrap()
+                        .map(|x| vk::DescriptorImageInfo {
+                            sampler: vk::Sampler::null(),
+                            image_view: x,
+                            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        })
+                        .collect::<Vec<_>>()[..]
+                        .as_ptr(),
+                    ..Default::default()
+                },
             ],
             &[],
         );
+        assert!(cache_views.next().is_none());
         mem::drop(cache_views);
 
         let vertex_shader_info = vk::ShaderModuleCreateInfo::builder().code(&VERT);
@@ -677,6 +712,9 @@ fn main() {
                             for (i, sample) in chunk.samples(CHUNK_NORMALS_SIZE).enumerate() {
                                 (*stage).normals[i] = pack_normal(&planet.normal_at(&sample));
                             }
+                            for (i, sample) in chunk.samples(CHUNK_COLORS_SIZE).enumerate() {
+                                (*stage).colors[i] = planet.color_at(&sample);
+                            }
                             let offset = stage as usize - base;
                             engine.transfer(
                                 cmd,
@@ -695,6 +733,17 @@ fn main() {
                                     texture: 1,
                                     buffer: staging_buffer,
                                     offset: (offset + offset_of!(StagedChunk, normals)) as vk::DeviceSize,
+                                    row_length: 0,
+                                    image_height: 0,
+                                },
+                                slot,
+                            );
+                            engine.transfer(
+                                cmd,
+                                planetmap::ash::TransferSource {
+                                    texture: 2,
+                                    buffer: staging_buffer,
+                                    offset: (offset + offset_of!(StagedChunk, colors)) as vk::DeviceSize,
                                     row_length: 0,
                                     image_height: 0,
                                 },
@@ -812,6 +861,7 @@ struct StagedChunk {
     heights: [f16; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE) as usize],
     _padding: [u8; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE * 2) as usize % 4],
     normals: [[i8; 2]; (CHUNK_NORMALS_SIZE * CHUNK_NORMALS_SIZE) as usize],
+    colors: [[u8; 4]; (CHUNK_COLORS_SIZE * CHUNK_COLORS_SIZE) as usize],
 }
 
 const STAGED_CHUNK_SIZE: u32 = least_greater_multiple(mem::size_of::<StagedChunk>() as u32, 4);

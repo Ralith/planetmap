@@ -20,10 +20,10 @@ void main() {
     Chunk chunk;
     chunk.coords = chunk_coords;
     chunk.depth = depth;
-    chunk.slot = slot % HEIGHTMAP_ARRAY_SIZE;
+    chunk.slot = slot % CACHE_ARRAY_SIZE;
     chunk.origin = origin;
     chunk.neighborhood = neighborhood;
-    Vertex vert = chunk_vertex(QUAD_COUNT, RADIUS, heightmap[slot / HEIGHTMAP_ARRAY_SIZE], chunk);
+    Vertex vert = chunk_vertex(QUAD_COUNT, RADIUS, heightmap[slot / CACHE_ARRAY_SIZE], chunk);
     gl_Position = projection * worldview * vec4(vert.position, 1);
     texcoords = vert.texcoords;
     normal = mat3(worldview) * vert.normal;
