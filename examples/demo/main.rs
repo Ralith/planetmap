@@ -22,8 +22,8 @@ const FRAG: &[u32] = include_glsl!("examples/demo/terrain.frag", debug);
 const CHUNK_HEIGHT_SIZE: u32 = 17;
 /// Number of quads along one edge of a chunk. Must be a power of two for stitching to work.
 const CHUNK_QUADS: u32 = CHUNK_HEIGHT_SIZE - 1;
-const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 4;
-const CHUNK_COLORS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 2;
+const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 3;
+const CHUNK_COLORS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 3;
 /// Amount of CPU-side staging memory to allocate for originating transfers
 const STAGING_BUFFER_LENGTH: u32 = 256;
 
@@ -37,7 +37,7 @@ fn main() {
             base.pdevice,
             base.device.clone(),
             planetmap::cache::Config {
-                max_depth: 12,
+                max_depth: 16,
             },
             &[
                 planetmap::ash::TextureKind {
@@ -707,13 +707,13 @@ fn main() {
                             let stage = stage.as_ptr() as *mut StagedChunk;
                             let slot = cache.allocate(chunk).unwrap();
                             for (i, sample) in chunk.samples(CHUNK_HEIGHT_SIZE).enumerate() {
-                                (*stage).heights[i] = f16::from_f64(planet.height_at(&sample));
+                                (*stage).heights.0[i] = f16::from_f64(planet.height_at(&sample));
                             }
                             for (i, sample) in chunk.samples(CHUNK_NORMALS_SIZE).enumerate() {
-                                (*stage).normals[i] = pack_normal(&planet.normal_at(&sample));
+                                (*stage).normals.0[i] = pack_normal(&planet.normal_at(&sample));
                             }
                             for (i, sample) in chunk.samples(CHUNK_COLORS_SIZE).enumerate() {
-                                (*stage).colors[i] = planet.color_at(&sample);
+                                (*stage).colors.0[i] = planet.color_at(&sample);
                             }
                             let offset = stage as usize - base;
                             engine.transfer(
@@ -856,12 +856,14 @@ struct Viewport {
     top: f32,
 }
 
+#[repr(align(4))]
+struct TransferAligned<T: Copy>(T);
+
 #[repr(C)]
 struct StagedChunk {
-    heights: [f16; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE) as usize],
-    _padding: [u8; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE * 2) as usize % 4],
-    normals: [[i8; 2]; (CHUNK_NORMALS_SIZE * CHUNK_NORMALS_SIZE) as usize],
-    colors: [[u8; 4]; (CHUNK_COLORS_SIZE * CHUNK_COLORS_SIZE) as usize],
+    heights: TransferAligned<[f16; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE) as usize]>,
+    normals: TransferAligned<[[i8; 2]; (CHUNK_NORMALS_SIZE * CHUNK_NORMALS_SIZE) as usize]>,
+    colors: TransferAligned<[[u8; 4]; (CHUNK_COLORS_SIZE * CHUNK_COLORS_SIZE) as usize]>,
 }
 
 const STAGED_CHUNK_SIZE: u32 = least_greater_multiple(mem::size_of::<StagedChunk>() as u32, 4);
