@@ -24,9 +24,8 @@ void main() {
 
     uint array = slot / CACHE_ARRAY_SIZE;
     uint layer = slot % CACHE_ARRAY_SIZE;
-    vec2 encoded = texture(normals[array], vec3(texcoords_for(normals[array]), layer)).xy;
-    vec3 decoded = vec3(encoded, sqrt(1-dot(encoded.xy, encoded.xy)));
-    vec3 normal = tangent_basis * decoded;
+    vec3 tangent_normal = normalize(texture(normals[array], vec3(texcoords_for(normals[array]), layer)).xyz);
+    vec3 normal = tangent_basis * tangent_normal;
 
     vec4 base_color = texture(colors[array], vec3(texcoords_for(colors[array]), layer));
 

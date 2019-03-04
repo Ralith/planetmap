@@ -49,7 +49,7 @@ fn main() {
                     stages: vk::PipelineStageFlags::VERTEX_SHADER,
                 },
                 planetmap::ash::TextureKind {
-                    format: vk::Format::R8G8_SNORM,
+                    format: vk::Format::R8G8B8A8_SNORM,
                     extent: vk::Extent2D {
                         width: CHUNK_NORMALS_SIZE,
                         height: CHUNK_NORMALS_SIZE,
@@ -860,7 +860,7 @@ struct Viewport {
 struct StagedChunk {
     heights: [f16; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE) as usize],
     _padding: [u8; (CHUNK_HEIGHT_SIZE * CHUNK_HEIGHT_SIZE * 2) as usize % 4],
-    normals: [[i8; 2]; (CHUNK_NORMALS_SIZE * CHUNK_NORMALS_SIZE) as usize],
+    normals: [[i8; 4]; (CHUNK_NORMALS_SIZE * CHUNK_NORMALS_SIZE) as usize],
     colors: [[u8; 4]; (CHUNK_COLORS_SIZE * CHUNK_COLORS_SIZE) as usize],
 }
 
@@ -905,6 +905,6 @@ const fn least_greater_multiple(x: u32, factor: u32) -> u32 {
     x + (factor - x % factor)
 }
 
-fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 2] {
-    [(normal.x * 127.0) as i8, (normal.y * 127.0) as i8]
+fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 4] {
+    [(normal.x * 127.0) as i8, (normal.y * 127.0) as i8, (normal.z * 127.0) as i8, 0]
 }
