@@ -22,7 +22,7 @@ const FRAG: &[u32] = include_glsl!("examples/demo/terrain.frag", debug);
 const CHUNK_HEIGHT_SIZE: u32 = 17;
 /// Number of quads along one edge of a chunk. Must be a power of two for stitching to work.
 const CHUNK_QUADS: u32 = CHUNK_HEIGHT_SIZE - 1;
-const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 2;
+const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 4;
 const CHUNK_COLORS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 2;
 /// Amount of CPU-side staging memory to allocate for originating transfers
 const STAGING_BUFFER_LENGTH: u32 = 256;
@@ -448,7 +448,7 @@ fn main() {
         let rasterization_info = vk::PipelineRasterizationStateCreateInfo {
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
             line_width: 1.0,
-            polygon_mode: vk::PolygonMode::LINE,
+            polygon_mode: vk::PolygonMode::FILL,
             ..Default::default()
         };
         let multisample_state_info = vk::PipelineMultisampleStateCreateInfo {
