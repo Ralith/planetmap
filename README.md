@@ -43,6 +43,8 @@ example of this suitable for use in a vertex shader.
 Planetmap includes a simple, unoptimized Vulkan demo that can be
 launched with `cargo run --release --features=ash --example demo`. Use
 WASDRF and click-and-drag to move; velocity is proportional to
-altitude.. For simplicity, it skips important optimizations such as
+altitude. For simplicity, it skips important optimizations such as
 generating and transferring chunks asynchronously in background
-threads and precomputing coarse octaves of the noise function used.
+threads, memoizing noise function samplings across height/color/normal
+map computation, and precomputing coarse octaves of the noise function
+used.
