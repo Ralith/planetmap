@@ -22,20 +22,20 @@ impl Planet {
 
     pub fn normal_at(&self, dir: &na::Unit<na::Vector3<f64>>) -> na::Unit<na::Vector3<f32>> {
         let basis = Face::from_vector(dir).basis::<f64>();
-        let center = self.noise_space(dir);
         let perp = basis.matrix().index((.., 1));
         let x = dir.into_inner().cross(&perp);
         let y = dir.into_inner().cross(&x);
-        let h = 1e-8;
+        let h = 1e-3;
         let x_off = x * h;
         let y_off = y * h;
+        let center = self.noise_space(dir);
         let x_0 = self.sample(center - x_off);
         let x_1 = self.sample(center + x_off);
         let y_0 = self.sample(center - y_off);
         let y_1 = self.sample(center + y_off);
-        let dx = na::Vector3::new(2.0*h, 0.0, x_1 - x_0);
-        let dy = na::Vector3::new(0.0, 2.0*h, y_1 - y_0);
-        na::Unit::new_normalize(na::convert(dx.cross(&dy)))
+        let dx = x_1 - x_0;
+        let dy = y_1 - y_0;
+        na::Unit::new_normalize(na::convert(na::Vector3::new(dx, -dy, (self.radius * 5e-5)))
     }
 
     pub fn color_at(&self, dir: &na::Unit<na::Vector3<f64>>) -> [u8; 4] {
