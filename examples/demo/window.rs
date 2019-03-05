@@ -30,7 +30,7 @@ use std::ops::Drop;
 use std::os::raw::{c_char, c_void};
 use std::sync::Arc;
 
-pub fn record_submit_commandbuffer<D: DeviceV1_0, F: FnOnce(&D, vk::CommandBuffer)>(
+pub fn record_submit_commandbuffer<T, D: DeviceV1_0, F: FnOnce() -> T>(
     device: &D,
     command_buffer: vk::CommandBuffer,
     submit_queue: vk::Queue,
@@ -38,7 +38,7 @@ pub fn record_submit_commandbuffer<D: DeviceV1_0, F: FnOnce(&D, vk::CommandBuffe
     wait_semaphores: &[vk::Semaphore],
     signal_semaphores: &[vk::Semaphore],
     f: F,
-) {
+) -> T {
     unsafe {
         device
             .reset_command_buffer(
@@ -53,7 +53,7 @@ pub fn record_submit_commandbuffer<D: DeviceV1_0, F: FnOnce(&D, vk::CommandBuffe
         device
             .begin_command_buffer(command_buffer, &command_buffer_begin_info)
             .expect("Begin commandbuffer");
-        f(device, command_buffer);
+        let x = f();
         device
             .end_command_buffer(command_buffer)
             .expect("End commandbuffer");
@@ -77,6 +77,7 @@ pub fn record_submit_commandbuffer<D: DeviceV1_0, F: FnOnce(&D, vk::CommandBuffe
             .wait_for_fences(&[submit_fence], true, std::u64::MAX)
             .expect("Wait for fence failed.");
         device.destroy_fence(submit_fence, None);
+        x
     }
 }
 
@@ -183,7 +184,7 @@ fn extension_names() -> Vec<*const i8> {
 }
 
 unsafe extern "system" fn vulkan_debug_callback(
-    _: vk::DebugReportFlagsEXT,
+    flags: vk::DebugReportFlagsEXT,
     _: vk::DebugReportObjectTypeEXT,
     _: u64,
     _: usize,
@@ -192,7 +193,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     p_message: *const c_char,
     _: *mut c_void,
 ) -> u32 {
-    eprintln!("{}", CStr::from_ptr(p_message).to_string_lossy());
+    eprintln!("{} {}", flags, CStr::from_ptr(p_message).to_string_lossy());
     vk::FALSE
 }
 

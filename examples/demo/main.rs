@@ -32,6 +32,43 @@ fn main() {
         let mut base = ExampleBase::new(512, 512);
         let planet = Planet::new();
 
+        let atmosphere_builder = fuzzyblue::Builder::new(
+            &base.instance,
+            base.device.clone(),
+            vk::PipelineCache::null(),
+            base.pdevice,
+            base.queue_family_index,
+            None,
+        );
+
+        let atmosphere_cmd = base
+            .device
+            .allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::builder()
+                    .command_buffer_count(1)
+                    .command_pool(base.pool)
+                    .level(vk::CommandBufferLevel::PRIMARY),
+            )
+            .unwrap()[0];
+        let atmosphere = record_submit_commandbuffer(
+            &*base.device,
+            atmosphere_cmd,
+            base.present_queue,
+            &[],
+            &[],
+            &[],
+            || {
+                atmosphere_builder.build(
+                    atmosphere_cmd,
+                    &fuzzyblue::Params {
+                        r_planet: planet.radius() as f32,
+                        ..Default::default()
+                    },
+                )
+            },
+        );
+        let atmosphere = atmosphere.assert_ready();
+
         let mut cache = planetmap::ash::Cache::new(
             &base.instance,
             base.pdevice,
@@ -117,6 +154,13 @@ fn main() {
             .device
             .create_render_pass(&renderpass_create_info, None)
             .unwrap();
+
+        let atmosphere_renderer = fuzzyblue::Renderer::new(
+            base.device.clone(),
+            vk::PipelineCache::null(),
+            true,
+            renderpass,
+        );
 
         let uniform_buffer_info = vk::BufferCreateInfo {
             size: mem::size_of::<Uniforms>() as u64,
@@ -776,7 +820,9 @@ fn main() {
                 &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
                 &[base.present_complete_semaphore],
                 &[base.rendering_complete_semaphore],
-                |device, cmd| {
+                || {
+                    let device = &*base.device;
+                    let cmd = base.draw_command_buffer;
                     if !transfers.is_empty() {
                         let base = staging.as_ptr() as usize;
                         for (stage, chunk) in staging.iter_mut().zip(transfers) {
@@ -845,25 +891,41 @@ fn main() {
                         &render_pass_begin_info,
                         vk::SubpassContents::INLINE,
                     );
-                    device.cmd_bind_descriptor_sets(
-                        cmd,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipeline_layout,
-                        0,
-                        &[descriptor_set],
-                        &[],
-                    );
-                    device.cmd_bind_pipeline(
-                        cmd,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        graphics_pipeline,
-                    );
-                    device.cmd_set_viewport(cmd, 0, &viewports);
-                    device.cmd_set_scissor(cmd, 0, &scissors);
-                    device.cmd_bind_vertex_buffers(cmd, 0, &[cache.instance_buffer()], &[0]);
                     if instances > 0 {
+                        device.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipeline_layout,
+                            0,
+                            &[descriptor_set],
+                            &[],
+                        );
+                        device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            graphics_pipeline,
+                        );
+                        device.cmd_set_viewport(cmd, 0, &viewports);
+                        device.cmd_set_scissor(cmd, 0, &scissors);
+                        device.cmd_bind_vertex_buffers(cmd, 0, &[cache.instance_buffer()], &[0]);
                         device.cmd_draw(cmd, CHUNK_QUADS * CHUNK_QUADS * 6, instances, 0, 0);
                     }
+                    let (zenith, height) = na::Unit::new_and_get(camera.translation.vector);
+                    atmosphere_renderer.draw(
+                        cmd,
+                        &atmosphere,
+                        &fuzzyblue::DrawParams {
+                            inverse_viewproj: (*(uniforms.projection
+                                * na::convert::<_, na::Isometry3<f32>>(view))
+                            .inverse()
+                            .matrix())
+                            .into(),
+                            zenith: na::convert::<_, na::Vector3<f32>>(zenith.into_inner()).into(),
+                            height: (height - planet.radius()) as f32,
+                            sun_direction: [0.0, 1.0, 0.0],
+                        },
+                        swapchain.extent,
+                    );
                     device.cmd_end_render_pass(cmd);
                 },
             );
