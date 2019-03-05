@@ -1,19 +1,19 @@
-mod window;
 mod planet;
+mod window;
 
 use std::ffi::CStr;
-use std::{mem, slice};
 use std::time::Instant;
+use std::{mem, slice};
 
 use ash::vk;
+use half::f16;
 use memoffset::offset_of;
 use vk_shader_macros::include_glsl;
-use half::f16;
 
 use planetmap::ash::ChunkInstance;
 
-use window::*;
 use planet::Planet;
+use window::*;
 
 const VERT: &[u32] = include_glsl!("examples/demo/terrain.vert", debug);
 const FRAG: &[u32] = include_glsl!("examples/demo/terrain.frag", debug);
@@ -36,9 +36,7 @@ fn main() {
             &base.instance,
             base.pdevice,
             base.device.clone(),
-            planetmap::cache::Config {
-                max_depth: 16,
-            },
+            planetmap::cache::Config { max_depth: 16 },
             &[
                 planetmap::ash::TextureKind {
                     format: vk::Format::R16_SFLOAT,
@@ -161,7 +159,6 @@ fn main() {
             .unwrap();
         let uniforms = &mut *uniform_ptr;
 
-        
         let staging_buffer_info = vk::BufferCreateInfo {
             size: (STAGED_CHUNK_SIZE * STAGING_BUFFER_LENGTH) as u64,
             usage: vk::BufferUsageFlags::TRANSFER_SRC,
@@ -286,7 +283,10 @@ fn main() {
         let descriptor_set = base
             .device
             .allocate_descriptor_sets(&desc_alloc_info)
-            .unwrap().into_iter().next().unwrap();
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
 
         let mut cache_views = cache.array_views();
 
@@ -377,8 +377,7 @@ fn main() {
         let pipeline_layout = base
             .device
             .create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&desc_set_layouts),
+                &vk::PipelineLayoutCreateInfo::builder().set_layouts(&desc_set_layouts),
                 None,
             )
             .unwrap();
@@ -515,7 +514,7 @@ fn main() {
                 constant_id: 3,
                 offset: offset_of!(Specialization, radius) as u32,
                 size: 4,
-            }
+            },
         ];
         let specialization_info = vk::SpecializationInfo::builder()
             .data(&specialization)
@@ -526,40 +525,38 @@ fn main() {
             .device
             .create_graphics_pipelines(
                 vk::PipelineCache::null(),
-                &[
-                    vk::GraphicsPipelineCreateInfo::builder()
-                        .stages(&[
-                            vk::PipelineShaderStageCreateInfo {
-                                module: vertex_shader_module,
-                                p_name: shader_entry_name.as_ptr(),
-                                stage: vk::ShaderStageFlags::VERTEX,
-                                p_specialization_info: &*specialization_info,
-                                ..Default::default()
-                            },
-                            vk::PipelineShaderStageCreateInfo {
-                                module: fragment_shader_module,
-                                p_name: shader_entry_name.as_ptr(),
-                                stage: vk::ShaderStageFlags::FRAGMENT,
-                                p_specialization_info: &*specialization_info,
-                                ..Default::default()
-                            },
-                        ])
-                        .vertex_input_state(&vertex_input_state_info)
-                        .input_assembly_state(&vertex_input_assembly_state_info)
-                        .viewport_state(&vk::PipelineViewportStateCreateInfo {
-                            scissor_count: 1,
-                            viewport_count: 1,
+                &[vk::GraphicsPipelineCreateInfo::builder()
+                    .stages(&[
+                        vk::PipelineShaderStageCreateInfo {
+                            module: vertex_shader_module,
+                            p_name: shader_entry_name.as_ptr(),
+                            stage: vk::ShaderStageFlags::VERTEX,
+                            p_specialization_info: &*specialization_info,
                             ..Default::default()
-                        })
-                        .rasterization_state(&rasterization_info)
-                        .multisample_state(&multisample_state_info)
-                        .depth_stencil_state(&depth_state_info)
-                        .color_blend_state(&color_blend_state)
-                        .dynamic_state(&dynamic_state_info)
-                        .layout(pipeline_layout)
-                        .render_pass(renderpass)
-                        .build()
-                ],
+                        },
+                        vk::PipelineShaderStageCreateInfo {
+                            module: fragment_shader_module,
+                            p_name: shader_entry_name.as_ptr(),
+                            stage: vk::ShaderStageFlags::FRAGMENT,
+                            p_specialization_info: &*specialization_info,
+                            ..Default::default()
+                        },
+                    ])
+                    .vertex_input_state(&vertex_input_state_info)
+                    .input_assembly_state(&vertex_input_assembly_state_info)
+                    .viewport_state(&vk::PipelineViewportStateCreateInfo {
+                        scissor_count: 1,
+                        viewport_count: 1,
+                        ..Default::default()
+                    })
+                    .rasterization_state(&rasterization_info)
+                    .multisample_state(&multisample_state_info)
+                    .depth_stencil_state(&depth_state_info)
+                    .color_blend_state(&color_blend_state)
+                    .dynamic_state(&dynamic_state_info)
+                    .layout(pipeline_layout)
+                    .render_pass(renderpass)
+                    .build()],
                 None,
             )
             .expect("Unable to create graphics pipeline")
@@ -582,58 +579,136 @@ fn main() {
         let mut back = Released;
         let mut up = Released;
         let mut down = Released;
+        let mut roll_left = Released;
+        let mut roll_right = Released;
+        let mut sprint = Released;
+        let mut walk = Released;
 
         let mut t0 = Instant::now();
         loop {
             let mut keep_going = true;
             base.events_loop.poll_events(|e| {
-                use winit::*;
                 use winit::WindowEvent::*;
+                use winit::*;
                 match e {
                     Event::WindowEvent { event, .. } => match event {
-                        CloseRequested => { keep_going = false; }
-                        MouseInput { button: MouseButton::Left, state, .. } => { panning = state; }
-                        WindowEvent::KeyboardInput { input: winit::KeyboardInput { state, virtual_keycode: Some(key), .. }, .. } => {
+                        CloseRequested => {
+                            keep_going = false;
+                        }
+                        MouseInput {
+                            button: MouseButton::Left,
+                            state,
+                            ..
+                        } => {
+                            panning = state;
+                        }
+                        WindowEvent::KeyboardInput {
+                            input:
+                                winit::KeyboardInput {
+                                    state,
+                                    virtual_keycode: Some(key),
+                                    ..
+                                },
+                            ..
+                        } => {
                             use VirtualKeyCode::*;
                             match key {
-                                A => { left = state; }
-                                D => { right = state; }
-                                W => { forward = state; }
-                                S => { back = state; }
-                                R => { up = state; }
-                                F => { down = state; }
+                                A => {
+                                    left = state;
+                                }
+                                D => {
+                                    right = state;
+                                }
+                                W => {
+                                    forward = state;
+                                }
+                                S => {
+                                    back = state;
+                                }
+                                R => {
+                                    up = state;
+                                }
+                                F => {
+                                    down = state;
+                                }
+                                Q => {
+                                    roll_left = state;
+                                }
+                                E => {
+                                    roll_right = state;
+                                }
+                                LShift => {
+                                    sprint = state;
+                                }
+                                LControl => {
+                                    walk = state;
+                                }
                                 _ => {}
                             }
                         }
                         _ => {}
                     },
-                    Event::DeviceEvent { event, .. } => { use winit::DeviceEvent::*; match event {
-                        MouseMotion { delta: (x, y) } if panning == Pressed => {
-                            camera = camera * na::Rotation3::from_axis_angle(&na::Vector3::y_axis(), -x * 0.003)
-                                * na::Rotation3::from_axis_angle(&na::Vector3::x_axis(), -y * 0.003);
+                    Event::DeviceEvent { event, .. } => {
+                        use winit::DeviceEvent::*;
+                        match event {
+                            MouseMotion { delta: (x, y) } if panning == Pressed => {
+                                camera = camera
+                                    * na::Rotation3::from_axis_angle(
+                                        &na::Vector3::y_axis(),
+                                        -x * 0.003,
+                                    )
+                                    * na::Rotation3::from_axis_angle(
+                                        &na::Vector3::x_axis(),
+                                        -y * 0.003,
+                                    );
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }}
+                    }
                     _ => {}
                 }
             });
-            if !keep_going { break; }
+            if !keep_going {
+                break;
+            }
 
             let t1 = Instant::now();
             let dt = t1 - t0;
             let dt = dt.as_secs() as f64 + dt.subsec_nanos() as f64 * 1e-9;
             t0 = t1;
 
+            camera = camera
+                * na::Rotation3::from_axis_angle(
+                    &na::Vector3::z_axis(),
+                    if roll_left == Pressed { 0.006 } else { 0.0 }
+                        + if roll_right == Pressed { -0.006 } else { 0.0 },
+                );
+
             let mut motion = na::Vector3::zeros();
-            if left == Pressed { motion.x -= 1.0; }
-            if right == Pressed { motion.x += 1.0; }
-            if forward == Pressed { motion.z -= 1.0; }
-            if back == Pressed { motion.z += 1.0; }
-            if up == Pressed { motion.y += 1.0; }
-            if down == Pressed { motion.y -= 1.0; }
+            if left == Pressed {
+                motion.x -= 1.0;
+            }
+            if right == Pressed {
+                motion.x += 1.0;
+            }
+            if forward == Pressed {
+                motion.z -= 1.0;
+            }
+            if back == Pressed {
+                motion.z += 1.0;
+            }
+            if up == Pressed {
+                motion.y += 1.0;
+            }
+            if down == Pressed {
+                motion.y -= 1.0;
+            }
             let altitude = camera.translation.vector.norm() - planet.radius();
-            let speed = altitude;
-            camera = camera * na::Translation3::from(motion * dt * if speed > 1e8 { 1e8 } else { speed });
+            let speed = altitude
+                * if sprint == Pressed { 3.0 } else { 1.0 }
+                * if walk == Pressed { 1.0 / 3.0 } else { 1.0 };
+            camera = camera
+                * na::Translation3::from(motion * dt * if speed > 1e8 { 1e8 } else { speed });
 
             let swapchain_suboptimal;
             let present_index = loop {
@@ -686,7 +761,8 @@ fn main() {
                 })
                 .clear_values(&clear_values);
 
-            let viewport = Viewport::from_vertical_fov(swapchain.extent, std::f32::consts::FRAC_PI_2);
+            let viewport =
+                Viewport::from_vertical_fov(swapchain.extent, std::f32::consts::FRAC_PI_2);
             uniforms.projection = viewport.projection(1e-2);
             uniforms.view = na::convert(camera.inverse());
             let view = camera.inverse();
@@ -721,7 +797,8 @@ fn main() {
                                 planetmap::ash::TransferSource {
                                     texture: 0,
                                     buffer: staging_buffer,
-                                    offset: (offset + offset_of!(StagedChunk, heights)) as vk::DeviceSize,
+                                    offset: (offset + offset_of!(StagedChunk, heights))
+                                        as vk::DeviceSize,
                                     row_length: 0,
                                     image_height: 0,
                                 },
@@ -732,7 +809,8 @@ fn main() {
                                 planetmap::ash::TransferSource {
                                     texture: 1,
                                     buffer: staging_buffer,
-                                    offset: (offset + offset_of!(StagedChunk, normals)) as vk::DeviceSize,
+                                    offset: (offset + offset_of!(StagedChunk, normals))
+                                        as vk::DeviceSize,
                                     row_length: 0,
                                     image_height: 0,
                                 },
@@ -743,7 +821,8 @@ fn main() {
                                 planetmap::ash::TransferSource {
                                     texture: 2,
                                     buffer: staging_buffer,
-                                    offset: (offset + offset_of!(StagedChunk, colors)) as vk::DeviceSize,
+                                    offset: (offset + offset_of!(StagedChunk, colors))
+                                        as vk::DeviceSize,
                                     row_length: 0,
                                     image_height: 0,
                                 },
@@ -751,14 +830,16 @@ fn main() {
                             );
                             transfer_slots.push(slot);
                         }
-                        device.flush_mapped_memory_ranges(&[vk::MappedMemoryRange {
-                            memory: staging_buffer_memory,
-                            offset: 0,
-                            size: vk::WHOLE_SIZE,
-                            ..Default::default()
-                        }]).unwrap();
+                        device
+                            .flush_mapped_memory_ranges(&[vk::MappedMemoryRange {
+                                memory: staging_buffer_memory,
+                                offset: 0,
+                                size: vk::WHOLE_SIZE,
+                                ..Default::default()
+                            }])
+                            .unwrap();
                     }
-                    
+
                     device.cmd_begin_render_pass(
                         cmd,
                         &render_pass_begin_info,
@@ -779,41 +860,29 @@ fn main() {
                     );
                     device.cmd_set_viewport(cmd, 0, &viewports);
                     device.cmd_set_scissor(cmd, 0, &scissors);
-                    device.cmd_bind_vertex_buffers(
-                        cmd,
-                        0,
-                        &[cache.instance_buffer()],
-                        &[0],
-                    );
+                    device.cmd_bind_vertex_buffers(cmd, 0, &[cache.instance_buffer()], &[0]);
                     if instances > 0 {
-                        device.cmd_draw(
-                            cmd,
-                            CHUNK_QUADS * CHUNK_QUADS * 6,
-                            instances,
-                            0,
-                            0,
-                        );
+                        device.cmd_draw(cmd, CHUNK_QUADS * CHUNK_QUADS * 6, instances, 0, 0);
                     }
                     device.cmd_end_render_pass(cmd);
                 },
             );
-            
+
             // Commands complete, so is the transfer.
             for slot in transfer_slots.drain(..) {
                 cache.transferred(slot);
             }
 
-            let out_of_date = match base.swapchain_loader
-                .queue_present(
-                    base.present_queue,
-                    &vk::PresentInfoKHR::builder()
-                        .wait_semaphores(&[base.rendering_complete_semaphore])
-                        .swapchains(&[swapchain.handle])
-                        .image_indices(&[present_index]))
-            {
+            let out_of_date = match base.swapchain_loader.queue_present(
+                base.present_queue,
+                &vk::PresentInfoKHR::builder()
+                    .wait_semaphores(&[base.rendering_complete_semaphore])
+                    .swapchains(&[swapchain.handle])
+                    .image_indices(&[present_index]),
+            ) {
                 Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => true,
                 Ok(false) => swapchain_suboptimal,
-                Err(e) => { panic!("{}", e) }
+                Err(e) => panic!("{}", e),
             };
             if out_of_date {
                 // Wait for present to finish
@@ -888,6 +957,7 @@ impl Viewport {
         }
     }
 
+    #[rustfmt::skip]
     fn projection(&self, znear: f32) -> na::Projective3<f32> {
         let idx = 1.0 / (self.right - self.left);
         let idy = 1.0 / (self.bottom - self.top);
