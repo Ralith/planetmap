@@ -359,9 +359,11 @@ impl ExampleBase {
                 .enabled_extension_names(&device_extension_names_raw)
                 .enabled_features(&features);
 
-            let device = Arc::new(instance
-                .create_device(pdevice, &device_create_info, None)
-                .unwrap());
+            let device = Arc::new(
+                instance
+                    .create_device(pdevice, &device_create_info, None)
+                    .unwrap(),
+            );
             let present_queue = device.get_device_queue(queue_family_index as u32, 0);
 
             let swapchain_loader = Arc::new(Swapchain::new(&instance, &*device));
@@ -466,9 +468,13 @@ pub struct SwapchainState {
 impl SwapchainState {
     pub fn new(base: &ExampleBase, render_pass: vk::RenderPass, old: Option<Self>) -> Self {
         unsafe {
-            let capabilities = base.surface_loader.get_physical_device_surface_capabilities(base.pdevice, base.surface).unwrap();
+            let capabilities = base
+                .surface_loader
+                .get_physical_device_surface_capabilities(base.pdevice, base.surface)
+                .unwrap();
 
-            let surface_capabilities = base.surface_loader
+            let surface_capabilities = base
+                .surface_loader
                 .get_physical_device_surface_capabilities(base.pdevice, base.surface)
                 .unwrap();
             let extent = match surface_capabilities.current_extent.width {
@@ -486,7 +492,8 @@ impl SwapchainState {
             } else {
                 surface_capabilities.current_transform
             };
-            let present_modes = base.surface_loader
+            let present_modes = base
+                .surface_loader
                 .get_physical_device_surface_present_modes(base.pdevice, base.surface)
                 .unwrap();
             let present_mode = present_modes
@@ -496,10 +503,15 @@ impl SwapchainState {
                 .unwrap_or(vk::PresentModeKHR::FIFO);
 
             let image_count = if capabilities.max_image_count > 0 {
-                capabilities.max_image_count.min(capabilities.min_image_count+1)
-            } else { capabilities.min_image_count + 1 };
+                capabilities
+                    .max_image_count
+                    .min(capabilities.min_image_count + 1)
+            } else {
+                capabilities.min_image_count + 1
+            };
 
-            let handle = base.swapchain_loader
+            let handle = base
+                .swapchain_loader
                 .create_swapchain(
                     &vk::SwapchainCreateInfoKHR::builder()
                         .surface(base.surface)
@@ -514,10 +526,17 @@ impl SwapchainState {
                         .present_mode(present_mode)
                         .clipped(true)
                         .image_array_layers(1)
-                        .old_swapchain(old.as_ref().map_or_else(vk::SwapchainKHR::null, |x| x.handle)), None)
+                        .old_swapchain(
+                            old.as_ref()
+                                .map_or_else(vk::SwapchainKHR::null, |x| x.handle),
+                        ),
+                    None,
+                )
                 .unwrap();
 
-            let device_memory_properties = base.instance.get_physical_device_memory_properties(base.pdevice);
+            let device_memory_properties = base
+                .instance
+                .get_physical_device_memory_properties(base.pdevice);
             let depth_image_create_info = vk::ImageCreateInfo::builder()
                 .image_type(vk::ImageType::TYPE_2D)
                 .format(vk::Format::D32_SFLOAT)
@@ -533,20 +552,24 @@ impl SwapchainState {
                 .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
                 .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-            let depth_image = base.device.create_image(&depth_image_create_info, None).unwrap();
+            let depth_image = base
+                .device
+                .create_image(&depth_image_create_info, None)
+                .unwrap();
             let depth_image_memory_req = base.device.get_image_memory_requirements(depth_image);
             let depth_image_memory_index = find_memorytype_index(
                 &depth_image_memory_req,
                 &device_memory_properties,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
             )
-                .expect("Unable to find suitable memory index for depth image.");
+            .expect("Unable to find suitable memory index for depth image.");
 
             let depth_image_allocate_info = vk::MemoryAllocateInfo::builder()
                 .allocation_size(depth_image_memory_req.size)
                 .memory_type_index(depth_image_memory_index);
 
-            let depth_image_memory = base.device
+            let depth_image_memory = base
+                .device
                 .allocate_memory(&depth_image_allocate_info, None)
                 .unwrap();
 
@@ -566,32 +589,42 @@ impl SwapchainState {
                 .format(depth_image_create_info.format)
                 .view_type(vk::ImageViewType::TYPE_2D);
 
-            let depth_image_view = base.device
+            let depth_image_view = base
+                .device
                 .create_image_view(&depth_image_view_info, None)
                 .unwrap();
 
-            let frames = base.swapchain_loader.get_swapchain_images(handle).unwrap().into_iter()
+            let frames = base
+                .swapchain_loader
+                .get_swapchain_images(handle)
+                .unwrap()
+                .into_iter()
                 .map(|image| {
-                    let view = base.device.create_image_view(
-                        &vk::ImageViewCreateInfo::builder()
-                            .view_type(vk::ImageViewType::TYPE_2D)
-                            .format(base.surface_format.format)
-                            .components(vk::ComponentMapping {
-                                r: vk::ComponentSwizzle::R,
-                                g: vk::ComponentSwizzle::G,
-                                b: vk::ComponentSwizzle::B,
-                                a: vk::ComponentSwizzle::A,
-                            })
-                            .subresource_range(vk::ImageSubresourceRange {
-                                aspect_mask: vk::ImageAspectFlags::COLOR,
-                                base_mip_level: 0,
-                                level_count: 1,
-                                base_array_layer: 0,
-                                layer_count: 1,
-                            })
-                            .image(image),
-                        None).unwrap();
-                    let buffer = base.device
+                    let view = base
+                        .device
+                        .create_image_view(
+                            &vk::ImageViewCreateInfo::builder()
+                                .view_type(vk::ImageViewType::TYPE_2D)
+                                .format(base.surface_format.format)
+                                .components(vk::ComponentMapping {
+                                    r: vk::ComponentSwizzle::R,
+                                    g: vk::ComponentSwizzle::G,
+                                    b: vk::ComponentSwizzle::B,
+                                    a: vk::ComponentSwizzle::A,
+                                })
+                                .subresource_range(vk::ImageSubresourceRange {
+                                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                })
+                                .image(image),
+                            None,
+                        )
+                        .unwrap();
+                    let buffer = base
+                        .device
                         .create_framebuffer(
                             &vk::FramebufferCreateInfo::builder()
                                 .render_pass(render_pass)
@@ -599,7 +632,9 @@ impl SwapchainState {
                                 .width(extent.width)
                                 .height(extent.height)
                                 .layers(1),
-                            None).unwrap();
+                            None,
+                        )
+                        .unwrap();
                     Frame {
                         image,
                         view,
@@ -617,18 +652,14 @@ impl SwapchainState {
 
                 depth_image,
                 depth_image_memory,
-                depth_image_view
+                depth_image_view,
             }
         }
     }
 
     pub unsafe fn acquire_next_image(&self, sem: vk::Semaphore) -> Result<(u32, bool), vk::Result> {
-        self.loader.acquire_next_image(
-            self.handle,
-            std::u64::MAX,
-            sem,
-            vk::Fence::null(),
-        )
+        self.loader
+            .acquire_next_image(self.handle, std::u64::MAX, sem, vk::Fence::null())
     }
 }
 
@@ -642,8 +673,7 @@ impl Drop for SwapchainState {
                 self.device.destroy_image_view(frame.view, None);
                 self.device.destroy_framebuffer(frame.buffer, None);
             }
-            self.loader
-                .destroy_swapchain(self.handle, None);
+            self.loader.destroy_swapchain(self.handle, None);
         }
     }
 }

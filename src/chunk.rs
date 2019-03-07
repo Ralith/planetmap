@@ -1,9 +1,9 @@
-use std::ops::Neg;
-use std::{fmt, mem};
 #[cfg(feature = "simd")]
 use simdeez::Simd;
 #[cfg(feature = "simd")]
 use std::marker::PhantomData;
+use std::ops::Neg;
+use std::{fmt, mem};
 
 use na::Real;
 
@@ -250,11 +250,20 @@ impl Neg for Face {
 impl Face {
     /// Find the face that intersects a vector originating at the center of a cube
     pub fn from_vector<N: Real + PartialOrd>(x: &na::Vector3<N>) -> Self {
-        let (&value, &axis) = x.iter()
+        let (&value, &axis) = x
+            .iter()
             .zip(&[Face::PX, Face::PY, Face::PZ])
-            .max_by(|(l, _), (r, _)| l.abs().partial_cmp(&r.abs()).unwrap_or(std::cmp::Ordering::Less))
+            .max_by(|(l, _), (r, _)| {
+                l.abs()
+                    .partial_cmp(&r.abs())
+                    .unwrap_or(std::cmp::Ordering::Less)
+            })
             .unwrap();
-        if value.is_sign_negative() { -axis } else { axis }
+        if value.is_sign_negative() {
+            -axis
+        } else {
+            axis
+        }
     }
 
     /// Transform from face space (facing +Z) to sphere space (facing the named axis).
@@ -428,8 +437,16 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
         }
         unsafe {
             let edge_length = S::set1_ps(self.chunk.edge_length() as f32);
-            let origin_on_face_x = S::fmsub_ps(S::set1_ps(self.chunk.coords.0 as f32), edge_length, S::set1_ps(1.0));
-            let origin_on_face_y = S::fmsub_ps(S::set1_ps(self.chunk.coords.1 as f32), edge_length, S::set1_ps(1.0));
+            let origin_on_face_x = S::fmsub_ps(
+                S::set1_ps(self.chunk.coords.0 as f32),
+                edge_length,
+                S::set1_ps(1.0),
+            );
+            let origin_on_face_y = S::fmsub_ps(
+                S::set1_ps(self.chunk.coords.1 as f32),
+                edge_length,
+                S::set1_ps(1.0),
+            );
             let max = self.resolution - 1;
             let (offset_x, offset_y) = if max == 0 {
                 let v = S::set1_ps(0.5) * edge_length;
@@ -449,8 +466,11 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
             let pos_on_face_x = origin_on_face_x + offset_x;
             let pos_on_face_y = origin_on_face_y + offset_y;
 
-            let len = S::sqrt_ps(S::fmadd_ps(pos_on_face_y, pos_on_face_y,
-                                             S::fmadd_ps(pos_on_face_x, pos_on_face_x, S::set1_ps(1.0))));
+            let len = S::sqrt_ps(S::fmadd_ps(
+                pos_on_face_y,
+                pos_on_face_y,
+                S::fmadd_ps(pos_on_face_x, pos_on_face_x, S::set1_ps(1.0)),
+            ));
             let dir_x = pos_on_face_x / len;
             let dir_y = pos_on_face_y / len;
             let dir_z = S::set1_ps(1.0) / len;
@@ -474,7 +494,6 @@ impl<S: Simd> ExactSizeIterator for SampleIterSimd<S> {
         self.size_hint().0
     }
 }
-
 
 pub struct Path {
     chunk: Chunk,
@@ -701,11 +720,15 @@ mod test {
         type S = simdeez::sse2::Sse2;
 
         let chunk = Chunk::root(Face::PZ);
-                
+
         let mut samples = chunk.samples(5);
         for [x, y, z] in chunk.samples_ps::<S>(5) {
             for i in 0..S::VF32_WIDTH {
-                let reference = if let Some(v) = samples.next() { v } else { break; };
+                let reference = if let Some(v) = samples.next() {
+                    v
+                } else {
+                    break;
+                };
                 assert_eq!(x[i], reference.x);
                 assert_eq!(y[i], reference.y);
                 assert_eq!(z[i], reference.z);

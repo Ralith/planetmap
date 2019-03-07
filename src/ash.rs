@@ -25,7 +25,9 @@ unsafe impl Send for Cache {}
 impl Drop for Cache {
     fn drop(&mut self) {
         unsafe {
-            self.shared.device.destroy_buffer(self.instance_buffer, None);
+            self.shared
+                .device
+                .destroy_buffer(self.instance_buffer, None);
             self.shared.device.free_memory(self.instance_memory, None);
         }
     }
@@ -180,12 +182,15 @@ impl Cache {
                     },
                 );
             }
-            self.shared.device.flush_mapped_memory_ranges(&[vk::MappedMemoryRange {
-                memory: self.instance_memory,
-                offset: 0,
-                size: vk::WHOLE_SIZE,
-                ..Default::default()
-            }]).unwrap()
+            self.shared
+                .device
+                .flush_mapped_memory_ranges(&[vk::MappedMemoryRange {
+                    memory: self.instance_memory,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                    ..Default::default()
+                }])
+                .unwrap()
         }
         (count, state.transfer)
     }
@@ -207,8 +212,14 @@ impl Cache {
         for kind in &self.shared.arrays {
             let image = kind.arrays[array as usize].image;
             unsafe {
-                device.cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TOP_OF_PIPE, kind.stages, Default::default(), &[], &[], &[
-                    vk::ImageMemoryBarrier {
+                device.cmd_pipeline_barrier(
+                    cmd,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    kind.stages,
+                    Default::default(),
+                    &[],
+                    &[],
+                    &[vk::ImageMemoryBarrier {
                         dst_access_mask: vk::AccessFlags::SHADER_READ,
                         old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                         new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -223,8 +234,8 @@ impl Cache {
                             layer_count: 1,
                         },
                         ..Default::default()
-                    }
-                ]);
+                    }],
+                );
             }
         }
     }
@@ -247,7 +258,10 @@ impl Cache {
     pub fn array_views<'a>(
         &'a self,
     ) -> impl Iterator<Item = impl Iterator<Item = vk::ImageView> + 'a> + 'a {
-        self.shared.arrays.iter().map(|x| x.arrays.iter().map(|x| x.view))
+        self.shared
+            .arrays
+            .iter()
+            .map(|x| x.arrays.iter().map(|x| x.view))
     }
 
     /// The number of slots per `vk::ImageView` in `array_views`

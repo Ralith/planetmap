@@ -109,13 +109,19 @@ impl Manager {
             ready: false,
         }) as u32;
         let old = self.index.insert(chunk, slot);
-        debug_assert!(old.is_none(), "a slot has already been allocated for this chunk");
+        debug_assert!(
+            old.is_none(),
+            "a slot has already been allocated for this chunk"
+        );
         Some(slot)
     }
 
     /// Indicate that a previously `allocate`d slot can now be safely read or reused
     pub fn release(&mut self, slot: u32) {
-        debug_assert!(!self.chunks[slot as usize].ready, "slot must be allocated to be released");
+        debug_assert!(
+            !self.chunks[slot as usize].ready,
+            "slot must be allocated to be released"
+        );
         self.chunks[slot as usize].ready = true;
     }
 
