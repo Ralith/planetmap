@@ -1,5 +1,9 @@
 use std::ops::Neg;
 use std::{fmt, mem};
+#[cfg(feature = "simd")]
+use simdeez::Simd;
+#[cfg(feature = "simd")]
+use std::marker::PhantomData;
 
 use na::Real;
 
@@ -159,6 +163,20 @@ impl Chunk {
             chunk: self,
             resolution,
             index: 0,
+        }
+    }
+
+    /// Returns a grid of resolution^2 directions contained by the chunk, in scan-line order
+    ///
+    /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
+    /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
+    #[cfg(feature = "simd")]
+    pub fn samples_ps<S: Simd>(self, resolution: u32) -> SampleIterSimd<S> {
+        SampleIterSimd {
+            chunk: self,
+            resolution,
+            index: 0,
+            _simd: PhantomData,
         }
     }
 
@@ -343,6 +361,7 @@ impl Neg for Edge {
     }
 }
 
+/// Iterator over sample points distributed in a regular grid across a chunk, including its edges
 #[derive(Debug)]
 pub struct SampleIter {
     chunk: Chunk,
@@ -387,6 +406,75 @@ impl ExactSizeIterator for SampleIter {
         (total - self.index) as usize
     }
 }
+
+/// Iterator over sample points distributed in a regular grid across a chunk, including its edges
+///
+/// Hand-vectorized, returning batches of each dimension in a separate register.
+#[cfg(feature = "simd")]
+#[derive(Debug)]
+pub struct SampleIterSimd<S> {
+    chunk: Chunk,
+    resolution: u32,
+    index: u32,
+    _simd: PhantomData<S>,
+}
+
+#[cfg(feature = "simd")]
+impl<S: Simd> Iterator for SampleIterSimd<S> {
+    type Item = [S::Vf32; 3];
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.resolution * self.resolution {
+            return None;
+        }
+        unsafe {
+            let edge_length = S::set1_ps(self.chunk.edge_length() as f32);
+            let origin_on_face_x = S::fmsub_ps(S::set1_ps(self.chunk.coords.0 as f32), edge_length, S::set1_ps(1.0));
+            let origin_on_face_y = S::fmsub_ps(S::set1_ps(self.chunk.coords.1 as f32), edge_length, S::set1_ps(1.0));
+            let max = self.resolution - 1;
+            let (offset_x, offset_y) = if max == 0 {
+                let v = S::set1_ps(0.5) * edge_length;
+                (v, v)
+            } else {
+                let step = edge_length / S::set1_ps(max as f32);
+                let mut xs = S::setzero_ps();
+                for i in 0..S::VF32_WIDTH {
+                    xs[i] = ((self.index + i as u32) % self.resolution) as f32;
+                }
+                let mut ys = S::setzero_ps();
+                for i in 0..S::VF32_WIDTH {
+                    ys[i] = ((self.index + i as u32) / self.resolution) as f32;
+                }
+                (xs * step, ys * step)
+            };
+            let pos_on_face_x = origin_on_face_x + offset_x;
+            let pos_on_face_y = origin_on_face_y + offset_y;
+
+            let len = S::sqrt_ps(S::fmadd_ps(pos_on_face_y, pos_on_face_y,
+                                             S::fmadd_ps(pos_on_face_x, pos_on_face_x, S::set1_ps(1.0))));
+            let dir_x = pos_on_face_x / len;
+            let dir_y = pos_on_face_y / len;
+            let dir_z = S::set1_ps(1.0) / len;
+
+            self.index += S::VF32_WIDTH as u32;
+            Some([dir_x, dir_y, dir_z])
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let total = self.resolution * self.resolution;
+        let remaining = (total - self.index) as usize;
+        let x = (remaining + S::VF32_WIDTH - 1) / S::VF32_WIDTH;
+        (x, Some(x))
+    }
+}
+
+#[cfg(feature = "simd")]
+impl<S: Simd> ExactSizeIterator for SampleIterSimd<S> {
+    fn len(&self) -> usize {
+        self.size_hint().0
+    }
+}
+
 
 pub struct Path {
     chunk: Chunk,
@@ -605,5 +693,23 @@ mod test {
             Chunk::root(Face::PZ).origin_on_face(),
             na::Vector3::z_axis()
         );
+    }
+
+    #[test]
+    #[cfg(feature = "simd")]
+    fn simd_samples() {
+        type S = simdeez::sse2::Sse2;
+
+        let chunk = Chunk::root(Face::PZ);
+                
+        let mut samples = chunk.samples(5);
+        for [x, y, z] in chunk.samples_ps::<S>(5) {
+            for i in 0..S::VF32_WIDTH {
+                let reference = if let Some(v) = samples.next() { v } else { break; };
+                assert_eq!(x[i], reference.x);
+                assert_eq!(y[i], reference.y);
+                assert_eq!(z[i], reference.z);
+            }
+        }
     }
 }
