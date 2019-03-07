@@ -923,6 +923,9 @@ fn main() {
                             zenith: na::convert::<_, na::Vector3<f32>>(zenith.into_inner()).into(),
                             sun_direction: [0.0, 1.0, 0.0],
                             height: (height - planet.radius() as f64) as f32,
+                            mie_anisotropy: fuzzyblue::MIE_ANISOTROPY_AIR,
+                            // Scale down to usable SDR values
+                            solar_irradiance: [fuzzyblue::SOL_IRRADIANCE[0] * 6e-3, fuzzyblue::SOL_IRRADIANCE[1] * 6e-3, fuzzyblue::SOL_IRRADIANCE[2] * 6e-3],
                         },
                         swapchain.extent,
                     );
