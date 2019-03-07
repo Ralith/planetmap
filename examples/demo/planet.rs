@@ -4,7 +4,7 @@ use planetmap::chunk::Face;
 
 pub struct Planet {
     noise: noise::Fbm,
-    radius: f64,
+    radius: f32,
 }
 
 impl Planet {
@@ -16,19 +16,20 @@ impl Planet {
     }
 
     /// Radial heightmap function
-    pub fn height_at(&self, dir: &na::Unit<na::Vector3<f64>>) -> f64 {
-        self.sample(na::Point::from(dir.into_inner() * self.radius))
+    pub fn height_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> f32 {
+        self.sample(na::Point::from(na::convert::<_, na::Vector3<f64>>(dir.into_inner()) * self.radius as f64)) as f32
     }
 
-    pub fn normal_at(&self, dir: &na::Unit<na::Vector3<f64>>) -> na::Unit<na::Vector3<f32>> {
+    pub fn normal_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> na::Unit<na::Vector3<f32>> {
         let basis = Face::from_vector(dir).basis::<f64>();
+        let dir = na::convert::<_, na::Vector3<f64>>(dir.into_inner());
         let perp = basis.matrix().index((.., 1));
-        let x = dir.into_inner().cross(&perp);
-        let y = dir.into_inner().cross(&x);
+        let x = dir.cross(&perp);
+        let y = dir.cross(&x);
         let h = 1e-3;
         let x_off = x * h;
         let y_off = y * h;
-        let center = na::Point::from(dir.into_inner() * self.radius);
+        let center = na::Point::from(dir * self.radius as f64);
         let x_0 = self.sample(center - x_off);
         let x_1 = self.sample(center + x_off);
         let y_0 = self.sample(center - y_off);
@@ -38,7 +39,7 @@ impl Planet {
         na::Unit::new_normalize(na::convert(na::Vector3::new(-dx, -dy, 1.0)))
     }
 
-    pub fn color_at(&self, dir: &na::Unit<na::Vector3<f64>>) -> [u8; 4] {
+    pub fn color_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> [u8; 4] {
         let height = self.height_at(dir);
         if height == 0.0 {
             [0, 0, 128, 255]
@@ -49,7 +50,7 @@ impl Planet {
         }
     }
 
-    pub fn radius(&self) -> f64 {
+    pub fn radius(&self) -> f32 {
         self.radius
     }
 

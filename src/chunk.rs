@@ -351,22 +351,22 @@ pub struct SampleIter {
 }
 
 impl Iterator for SampleIter {
-    type Item = na::Unit<na::Vector3<f64>>;
-    fn next(&mut self) -> Option<na::Unit<na::Vector3<f64>>> {
+    type Item = na::Unit<na::Vector3<f32>>;
+    fn next(&mut self) -> Option<na::Unit<na::Vector3<f32>>> {
         if self.index >= self.resolution * self.resolution {
             return None;
         }
-        let edge_length = self.chunk.edge_length();
+        let edge_length = self.chunk.edge_length() as f32;
         let origin_on_face =
-            na::Vector2::new(self.chunk.coords.0 as f64, self.chunk.coords.1 as f64) * edge_length
+            na::Vector2::new(self.chunk.coords.0 as f32, self.chunk.coords.1 as f32) * edge_length
                 - na::Vector2::new(1.0, 1.0);
         let max = self.resolution - 1;
         let offset = if max == 0 {
-            na::Vector2::new(0.5, 0.5) * self.chunk.edge_length()
+            na::Vector2::new(0.5, 0.5) * edge_length
         } else {
-            let step = self.chunk.edge_length() / max as f64;
+            let step = edge_length / max as f32;
             let (x, y) = (self.index % self.resolution, self.index / self.resolution);
-            na::Vector2::new(x as f64, y as f64) * step
+            na::Vector2::new(x as f32, y as f32) * step
         };
         let pos_on_face = origin_on_face + offset;
         let dir = self.chunk.face.direction(&pos_on_face);
@@ -564,7 +564,7 @@ mod test {
                     1
                 );
                 // and another at a corner
-                let corner = 1.0 / 3.0f64.sqrt();
+                let corner = 1.0 / 3.0f32.sqrt();
                 assert_eq!(
                     chunk
                         .samples(2)

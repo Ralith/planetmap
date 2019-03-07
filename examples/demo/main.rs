@@ -61,7 +61,7 @@ fn main() {
                 atmosphere_builder.build(
                     atmosphere_cmd,
                     &fuzzyblue::Params {
-                        r_planet: planet.radius() as f32,
+                        r_planet: planet.radius(),
                         ..Default::default()
                     },
                 )
@@ -536,7 +536,7 @@ fn main() {
             quad_count: CHUNK_QUADS,
             heightmap_array_size: cache.array_size(),
             heightmap_array_count: cache.array_count(),
-            radius: planet.radius() as f32,
+            radius: planet.radius(),
         });
         let specialization_map = [
             vk::SpecializationMapEntry {
@@ -611,7 +611,7 @@ fn main() {
         let mut swapchain = SwapchainState::new(&base, renderpass, None);
 
         let mut camera = na::IsometryMatrix3::from_parts(
-            na::Translation3::from(na::Vector3::new(0.0, planet.radius() + 1e4, 0.0)),
+            na::Translation3::from(na::Vector3::new(0.0, planet.radius() as f64 + 1e4, 0.0)),
             na::Rotation3::identity(),
         );
 
@@ -747,7 +747,7 @@ fn main() {
             if down == Pressed {
                 motion.y -= 1.0;
             }
-            let altitude = camera.translation.vector.norm() - planet.radius();
+            let altitude = camera.translation.vector.norm() - planet.radius() as f64;
             let speed = altitude
                 * if sprint == Pressed { 3.0 } else { 1.0 }
                 * if walk == Pressed { 1.0 / 3.0 } else { 1.0 };
@@ -810,7 +810,7 @@ fn main() {
             uniforms.projection = viewport.projection(1e-2);
             uniforms.view = na::convert(camera.inverse());
             let view = camera.inverse();
-            let (instances, transfers) = cache.update(planet.radius(), &view);
+            let (instances, transfers) = cache.update(planet.radius() as f64, &view);
 
             let mut transfer_slots = Vec::new();
             record_submit_commandbuffer(
@@ -829,7 +829,7 @@ fn main() {
                             let stage = stage.as_ptr() as *mut StagedChunk;
                             let slot = cache.allocate(chunk).unwrap();
                             for (i, sample) in chunk.samples(CHUNK_HEIGHT_SIZE).enumerate() {
-                                (*stage).heights.0[i] = f16::from_f64(planet.height_at(&sample));
+                                (*stage).heights.0[i] = f16::from_f32(planet.height_at(&sample));
                             }
                             for (i, sample) in chunk.samples(CHUNK_NORMALS_SIZE).enumerate() {
                                 (*stage).normals.0[i] = pack_normal(&planet.normal_at(&sample));
@@ -921,8 +921,8 @@ fn main() {
                             .matrix())
                             .into(),
                             zenith: na::convert::<_, na::Vector3<f32>>(zenith.into_inner()).into(),
-                            height: (height - planet.radius()) as f32,
                             sun_direction: [0.0, 1.0, 0.0],
+                            height: (height - planet.radius() as f64) as f32,
                         },
                         swapchain.extent,
                     );
