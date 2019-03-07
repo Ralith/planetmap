@@ -1,4 +1,4 @@
-use noise::NoiseFn;
+use noise::{NoiseFn, MultiFractal};
 
 use planetmap::chunk::Face;
 
@@ -10,14 +10,16 @@ pub struct Planet {
 impl Planet {
     pub fn new() -> Self {
         Self {
-            noise: Default::default(),
+            noise: noise::Fbm::new().set_octaves(12).set_frequency(1.0/64.0).set_persistence(0.7),
             radius: 6371e3,
         }
     }
 
     /// Radial heightmap function
     pub fn height_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> f32 {
-        self.sample(na::Point::from(na::convert::<_, na::Vector3<f64>>(dir.into_inner()) * self.radius as f64)) as f32
+        let p = na::Point::from(na::convert::<_, na::Vector3<f64>>(dir.into_inner()) * self.radius as f64);
+        let s = self.sample(p);
+        if s < 0.0 { 0.0 } else { s as f32 }
     }
 
     pub fn normal_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> na::Unit<na::Vector3<f32>> {
@@ -41,22 +43,49 @@ impl Planet {
 
     pub fn color_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> [u8; 4] {
         let height = self.height_at(dir);
-        if height == 0.0 {
-            [0, 0, 128, 255]
-        } else if height < 2000.0 {
-            [0, 128, 0, 255]
-        } else {
-            [255, 255, 255, 255]
-        }
+        blend(height, &[
+            // deep ocean
+            ([0, 0, 0, 255], [0, 0, 128, 255], -1000.0, -10.0),
+            // beach
+            ([0, 0, 128, 255], [192, 192, 128, 255], -10.0, 100.0),
+            ([192, 192, 128, 255], [192, 192, 128, 255], 100.0, 200.0),
+            ([192, 192, 128, 255], [160, 192, 80, 255], 200.0, 210.0),
+            // grass, forest, deep forest
+            ([160, 192, 80, 255], [160, 192, 80, 255], 210.0, 290.0),
+            ([160, 192, 80, 255], [64, 192, 64, 255], 290.0, 300.0),
+            ([64, 192, 64, 255], [0, 90, 0, 255], 300.0, 1290.0),
+            // vegetation line
+            ([0, 90, 0, 255], [160, 160, 160, 255], 1290.0, 1300.0),
+            ([160, 160, 160, 255], [192, 192, 192, 255], 1300.0, 1990.0),
+            // snow transition
+            ([192, 192, 192, 255], [255, 255, 255, 255], 1990.0, 2000.0),
+            ([255, 255, 255, 255], [255, 255, 255, 255], 2000.0, 200000.0),
+        ])
     }
 
     pub fn radius(&self) -> f32 {
         self.radius
     }
 
-    fn sample(&self, x: na::Point3<f64>) -> f64 {
-        let point: [f64; 3] = (x.coords * 5e-5).into();
-        let h = ((1.0 + self.noise.get(point)).powi(3) - 1.0) * 1000.0;
-        if h < 0.0 { 0.0 } else { h }
+    fn sample(&self, p: na::Point3<f64>) -> f64 {
+        let point: [f64; 3] = (p.coords * 5e-5).into();
+        let lat = (p.z / self.radius as f64).abs();
+        let h = ((1.0 + self.noise.get(point)).powi(3) - 1.0) * 1500.0 + (lat - 0.3) * 3000.0;
+        if h < -1000.0 { -1000.0 } else { h }
     }
+}
+
+fn blend(f: f32, ranges: &[([u8; 4], [u8; 4], f32, f32)]) -> [u8; 4] {
+    for &(from, to, low, high) in ranges {
+        if (f >= low) && (f < high) {
+            let ff = (f - low) / (high - low);
+            return [
+                (from[0] as f32 + (to[0] as f32 - from[0] as f32) * ff) as u8,
+                (from[1] as f32 + (to[1] as f32 - from[1] as f32) * ff) as u8,
+                (from[2] as f32 + (to[2] as f32 - from[2] as f32) * ff) as u8,
+                (from[3] as f32 + (to[3] as f32 - from[3] as f32) * ff) as u8,
+            ];
+        }
+    }
+    unreachable!("f = {}", f);
 }

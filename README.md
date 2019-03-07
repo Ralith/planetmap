@@ -47,4 +47,5 @@ altitude. For simplicity, it skips important optimizations such as
 generating and transferring chunks asynchronously in background
 threads, memoizing noise function samplings across height/color/normal
 map computation, and precomputing coarse octaves of the noise function
-used.
+used. The jittery performance which results can be avoided in a real
+application by not blocking frame rendering on chunk generation.
