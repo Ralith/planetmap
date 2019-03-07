@@ -828,15 +828,15 @@ fn main() {
                         for (stage, chunk) in staging.iter_mut().zip(transfers) {
                             let stage = stage.as_ptr() as *mut StagedChunk;
                             let slot = cache.allocate(chunk).unwrap();
-                            for (i, sample) in chunk.samples(CHUNK_HEIGHT_SIZE).enumerate() {
-                                (*stage).heights.0[i] = f16::from_f32(planet.height_at(&sample));
-                            }
-                            for (i, sample) in chunk.samples(CHUNK_NORMALS_SIZE).enumerate() {
-                                (*stage).normals.0[i] = pack_normal(&planet.normal_at(&sample));
-                            }
-                            for (i, sample) in chunk.samples(CHUNK_COLORS_SIZE).enumerate() {
-                                (*stage).colors.0[i] = planet.color_at(&sample);
-                            }
+                            planet.generate_chunk(
+                                &chunk,
+                                CHUNK_HEIGHT_SIZE,
+                                &mut (*stage).heights.0[..],
+                                CHUNK_NORMALS_SIZE,
+                                &mut (*stage).normals.0[..],
+                                CHUNK_COLORS_SIZE,
+                                &mut (*stage).colors.0[..],
+                            );
                             let offset = stage as usize - base;
                             engine.transfer(
                                 cmd,
@@ -1044,8 +1044,4 @@ impl Viewport {
 /// Compute smallest multiple of `factor` which is >= `x`
 const fn least_greater_multiple(x: u32, factor: u32) -> u32 {
     x + (factor - x % factor)
-}
-
-fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 2] {
-    [(normal.x * 127.0) as i8, (normal.y * 127.0) as i8]
 }

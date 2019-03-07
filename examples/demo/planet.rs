@@ -1,6 +1,7 @@
 use noise::{MultiFractal, NoiseFn};
 
-use planetmap::chunk::Face;
+use half::f16;
+use planetmap::{chunk::Face, Chunk};
 
 pub struct Planet {
     noise: noise::Fbm,
@@ -18,8 +19,29 @@ impl Planet {
         }
     }
 
+    pub fn generate_chunk(
+        &self,
+        chunk: &Chunk,
+        height_resolution: u32,
+        heights: &mut [f16],
+        normal_resolution: u32,
+        normals: &mut [[i8; 2]],
+        color_resolution: u32,
+        colors: &mut [[u8; 4]],
+    ) {
+        for (i, sample) in chunk.samples(height_resolution).enumerate() {
+            heights[i] = f16::from_f32(self.height_at(&sample));
+        }
+        for (i, sample) in chunk.samples(normal_resolution).enumerate() {
+            normals[i] = pack_normal(&self.normal_at(&sample));
+        }
+        for (i, sample) in chunk.samples(color_resolution).enumerate() {
+            colors[i] = self.color_at(&sample);
+        }
+    }
+
     /// Radial heightmap function
-    pub fn height_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> f32 {
+    fn height_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> f32 {
         let p = na::Point::from(
             na::convert::<_, na::Vector3<f64>>(dir.into_inner()) * self.radius as f64,
         );
@@ -31,7 +53,7 @@ impl Planet {
         }
     }
 
-    pub fn normal_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> na::Unit<na::Vector3<f32>> {
+    fn normal_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> na::Unit<na::Vector3<f32>> {
         let basis = Face::from_vector(dir).basis::<f64>();
         let dir = na::convert::<_, na::Vector3<f64>>(dir.into_inner());
         let perp = basis.matrix().index((.., 1));
@@ -50,7 +72,7 @@ impl Planet {
         na::Unit::new_normalize(na::convert(na::Vector3::new(-dx, -dy, 1.0)))
     }
 
-    pub fn color_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> [u8; 4] {
+    fn color_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> [u8; 4] {
         let height = self.height_at(dir);
         blend(
             height,
@@ -104,4 +126,8 @@ fn blend(f: f32, ranges: &[([u8; 4], [u8; 4], f32, f32)]) -> [u8; 4] {
         }
     }
     unreachable!("f = {}", f);
+}
+
+fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 2] {
+    [(normal.x * 127.0) as i8, (normal.y * 127.0) as i8]
 }
