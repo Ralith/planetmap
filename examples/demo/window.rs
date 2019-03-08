@@ -275,12 +275,6 @@ impl ExampleBase {
             let entry = Entry::new().unwrap();
             let app_name = CString::new("planetmap example").unwrap();
 
-            let layer_names = [CString::new("VK_LAYER_LUNARG_standard_validation").unwrap()];
-            let layers_names_raw: Vec<*const i8> = layer_names
-                .iter()
-                .map(|raw_name| raw_name.as_ptr())
-                .collect();
-
             let extension_names_raw = extension_names();
 
             let appinfo = vk::ApplicationInfo::builder()
@@ -292,7 +286,6 @@ impl ExampleBase {
 
             let create_info = vk::InstanceCreateInfo::builder()
                 .application_info(&appinfo)
-                .enabled_layer_names(&layers_names_raw)
                 .enabled_extension_names(&extension_names_raw);
 
             let instance: Instance = entry
