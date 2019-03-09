@@ -12,7 +12,7 @@ impl Planet {
     pub fn new() -> Self {
         Self {
             noise: noise::Fbm::new()
-                .set_octaves(12)
+                .set_octaves(10)
                 .set_frequency(1.0 / 64.0)
                 .set_persistence(0.7),
             radius: 6371e3,
