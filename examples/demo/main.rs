@@ -60,6 +60,7 @@ fn main() {
             || {
                 atmosphere_builder.build(
                     atmosphere_cmd,
+                    1,
                     &fuzzyblue::Params {
                         r_planet: planet.radius(),
                         ..Default::default()
@@ -67,7 +68,7 @@ fn main() {
                 )
             },
         );
-        let atmosphere = atmosphere.assert_ready();
+        let mut atmosphere = atmosphere.assert_ready();
 
         let mut cache = planetmap::ash::Cache::new(
             &base.instance,
@@ -126,40 +127,64 @@ fn main() {
             attachment: 0,
             layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         }];
-        let depth_attachment_ref = vk::AttachmentReference {
-            attachment: 1,
-            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        };
-        let dependencies = [vk::SubpassDependency {
-            src_subpass: vk::SUBPASS_EXTERNAL,
-            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_READ
-                | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            ..Default::default()
-        }];
-
-        let subpasses = [vk::SubpassDescription::builder()
-            .color_attachments(&color_attachment_refs)
-            .depth_stencil_attachment(&depth_attachment_ref)
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .build()];
-
-        let renderpass_create_info = vk::RenderPassCreateInfo::builder()
-            .attachments(&renderpass_attachments)
-            .subpasses(&subpasses)
-            .dependencies(&dependencies);
 
         let renderpass = base
             .device
-            .create_render_pass(&renderpass_create_info, None)
+            .create_render_pass(
+                &vk::RenderPassCreateInfo::builder()
+                    .attachments(&renderpass_attachments)
+                    .subpasses(&[
+                        vk::SubpassDescription::builder()
+                            .color_attachments(&color_attachment_refs)
+                            .depth_stencil_attachment(&vk::AttachmentReference {
+                                attachment: 1,
+                                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                            })
+                            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                            .build(),
+                        vk::SubpassDescription::builder()
+                            .color_attachments(&color_attachment_refs)
+                            .depth_stencil_attachment(&vk::AttachmentReference {
+                                attachment: 1,
+                                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                            })
+                            .input_attachments(&[vk::AttachmentReference {
+                                attachment: 1,
+                                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                            }])
+                            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                            .build(),
+                    ])
+                    .dependencies(&[
+                        vk::SubpassDependency {
+                            src_subpass: vk::SUBPASS_EXTERNAL,
+                            dst_subpass: 0,
+                            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_READ
+                                | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                            ..Default::default()
+                        },
+                        vk::SubpassDependency {
+                            src_subpass: 0,
+                            dst_subpass: 1,
+                            src_stage_mask: vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            dst_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
+                            src_access_mask: vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                            dst_access_mask: vk::AccessFlags::INPUT_ATTACHMENT_READ,
+                            dependency_flags: vk::DependencyFlags::BY_REGION,
+                        },
+                    ]),
+                None,
+            )
             .unwrap();
 
         let atmosphere_renderer = fuzzyblue::Renderer::new(
-            base.device.clone(),
+            &atmosphere_builder,
             vk::PipelineCache::null(),
             true,
             renderpass,
+            1,
         );
 
         let uniform_buffer_info = vk::BufferCreateInfo {
@@ -766,6 +791,7 @@ fn main() {
                     }
                 }
             };
+            atmosphere.set_depth_buffer(0, swapchain.depth_image_view);
             let clear_values = [
                 vk::ClearValue {
                     color: vk::ClearColorValue {
@@ -907,6 +933,9 @@ fn main() {
                         device.cmd_bind_vertex_buffers(cmd, 0, &[cache.instance_buffer()], &[0]);
                         device.cmd_draw(cmd, CHUNK_QUADS * CHUNK_QUADS * 6, instances, 0, 0);
                     }
+
+                    device.cmd_next_subpass(cmd, vk::SubpassContents::INLINE);
+
                     let (zenith, height) = na::Unit::new_and_get(camera.translation.vector);
                     atmosphere_renderer.draw(
                         cmd,
@@ -929,6 +958,7 @@ fn main() {
                             ],
                         },
                         swapchain.extent,
+                        0,
                     );
                     device.cmd_end_render_pass(cmd);
                 },

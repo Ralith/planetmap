@@ -454,7 +454,7 @@ pub struct SwapchainState {
     pub frames: Vec<Frame>,
 
     depth_image: vk::Image,
-    depth_image_view: vk::ImageView,
+    pub depth_image_view: vk::ImageView,
     depth_image_memory: vk::DeviceMemory,
 }
 
@@ -542,7 +542,7 @@ impl SwapchainState {
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .tiling(vk::ImageTiling::OPTIMAL)
-                .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+                .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::INPUT_ATTACHMENT)
                 .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
             let depth_image = base
