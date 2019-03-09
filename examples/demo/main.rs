@@ -724,8 +724,9 @@ fn main() {
             camera = camera
                 * na::Rotation3::from_axis_angle(
                     &na::Vector3::z_axis(),
-                    if roll_left == Pressed { 0.006 } else { 0.0 }
-                        + if roll_right == Pressed { -0.006 } else { 0.0 },
+                    (if roll_left == Pressed { 1.0 } else { 0.0 }
+                     + if roll_right == Pressed { -1.0 } else { 0.0 })
+                        * dt,
                 );
 
             let mut motion = na::Vector3::zeros();
