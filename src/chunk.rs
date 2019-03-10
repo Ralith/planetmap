@@ -140,19 +140,21 @@ impl Chunk {
     }
 
     /// Length of one of this chunk's edges before mapping onto the sphere
-    pub fn edge_length(&self) -> f64 {
-        2.0 / 2u32.pow(self.depth as u32) as f64
+    pub fn edge_length<R: Real>(&self) -> R {
+        na::convert::<_, R>(2.0) / na::convert::<_, R>(2u32.pow(self.depth as u32) as f64)
     }
 
     /// Location of the center of this chunk on the surface of the sphere
     ///
     /// Transform by face.basis() to get world origin
-    pub fn origin_on_face(&self) -> na::Unit<na::Vector3<f64>> {
-        let size = self.edge_length() as f64;
+    pub fn origin_on_face<R: Real>(&self) -> na::Unit<na::Vector3<R>> {
+        let size = self.edge_length::<R>();
         let vec = na::Vector3::new(
-            (self.coords.0 as f64 + 0.5) * size - 1.0,
-            (self.coords.1 as f64 + 0.5) * size - 1.0,
-            1.0,
+            (na::convert::<_, R>(self.coords.0 as f64) + na::convert::<_, R>(0.5)) * size
+                - na::convert(1.0),
+            (na::convert::<_, R>(self.coords.1 as f64) + na::convert::<_, R>(0.5)) * size
+                - na::convert(1.0),
+            na::convert(1.0),
         );
         na::Unit::new_normalize(vec)
     }
@@ -384,7 +386,7 @@ impl Iterator for SampleIter {
         if self.index >= self.resolution * self.resolution {
             return None;
         }
-        let edge_length = self.chunk.edge_length() as f32;
+        let edge_length = self.chunk.edge_length::<f32>();
         let origin_on_face =
             na::Vector2::new(self.chunk.coords.0 as f32, self.chunk.coords.1 as f32) * edge_length
                 - na::Vector2::new(1.0, 1.0);
@@ -436,7 +438,7 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
             return None;
         }
         unsafe {
-            let edge_length = S::set1_ps(self.chunk.edge_length() as f32);
+            let edge_length = S::set1_ps(self.chunk.edge_length::<f32>());
             let origin_on_face_x = S::fmsub_ps(
                 S::set1_ps(self.chunk.coords.0 as f32),
                 edge_length,
@@ -709,7 +711,7 @@ mod test {
     #[test]
     fn origin_sanity() {
         assert_eq!(
-            Chunk::root(Face::PZ).origin_on_face(),
+            Chunk::root(Face::PZ).origin_on_face::<f32>(),
             na::Vector3::z_axis()
         );
     }
