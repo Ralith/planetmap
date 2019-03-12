@@ -30,15 +30,9 @@ impl Chunk {
     }
 
     /// Compute the chunk at `depth` that intersects the vector from the origin towards `dir`
-    pub fn from_vector(dir: &na::Vector3<f32>, depth: u8) -> Self {
-        let (face, texcoords) = Face::coords(dir);
-        let coords = addressing::discretize(2u32.pow(depth as u32) as usize, &texcoords);
+    pub fn from_vector(depth: u8, dir: &na::Vector3<f32>) -> Self {
         Self {
-            coords: Coords {
-                x: coords.0 as u32,
-                y: coords.1 as u32,
-                face,
-            },
+            coords: Coords::from_vector(2u32.pow(depth as u32), dir),
             depth,
         }
     }
@@ -198,6 +192,16 @@ pub struct Coords {
 }
 
 impl Coords {
+    pub fn from_vector(resolution: u32, vector: &na::Vector3<f32>) -> Self {
+        let (face, unit_coords) = Face::coords(vector);
+        let (x, y) = addressing::discretize(resolution as usize, &unit_coords);
+        Self {
+            x: x as u32,
+            y: y as u32,
+            face,
+        }
+    }
+
     pub fn neighbors(&self, resolution: u32) -> [Self; 4] {
         let Coords { x, y, face } = *self;
         let max = resolution - 1;
