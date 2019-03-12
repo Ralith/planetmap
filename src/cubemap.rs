@@ -1,8 +1,8 @@
 use std::ops::{Index, IndexMut};
 use std::{iter, vec};
 
-use crate::chunk::Face;
 use crate::addressing::discretize;
+use crate::chunk::{Coords, Face};
 
 /// A dense, fixed-resolution cube map
 ///
@@ -101,21 +101,38 @@ impl<T> IndexMut<Face> for CubeMap<T> {
     }
 }
 
-impl<'a, T> Index<&'a na::Unit<na::Vector3<f32>>> for CubeMap<T> {
+impl<T> Index<Coords> for CubeMap<T> {
     type Output = T;
-    fn index(&self, x: &'a na::Unit<na::Vector3<f32>>) -> &T {
+    fn index(&self, coord: Coords) -> &T {
+        let face_size = self.resolution * self.resolution;
+        let offset = face_size * coord.face as usize;
+        &self.data[offset + self.resolution * coord.y as usize + coord.x as usize]
+    }
+}
+
+impl<T> IndexMut<Coords> for CubeMap<T> {
+    fn index_mut(&mut self, coord: Coords) -> &mut T {
+        let face_size = self.resolution * self.resolution;
+        let offset = face_size * coord.face as usize;
+        &mut self.data[offset + self.resolution * coord.y as usize + coord.x as usize]
+    }
+}
+
+impl<'a, T> Index<&'a na::Vector3<f32>> for CubeMap<T> {
+    type Output = T;
+    fn index(&self, x: &'a na::Vector3<f32>) -> &T {
         &self.data[index(self.resolution, x)]
     }
 }
 
-impl<'a, T> IndexMut<&'a na::Unit<na::Vector3<f32>>> for CubeMap<T> {
-    fn index_mut(&mut self, x: &'a na::Unit<na::Vector3<f32>>) -> &mut T {
+impl<'a, T> IndexMut<&'a na::Vector3<f32>> for CubeMap<T> {
+    fn index_mut(&mut self, x: &'a na::Vector3<f32>) -> &mut T {
         &mut self.data[index(self.resolution, x)]
     }
 }
 
-fn index(resolution: usize, x: &na::Unit<na::Vector3<f32>>) -> usize {
-    let (face, texcoords) = Face::coords(x.as_ref());
+fn index(resolution: usize, x: &na::Vector3<f32>) -> usize {
+    let (face, texcoords) = Face::coords(x);
     let texel = discretize(resolution, &texcoords);
     face as usize * resolution * resolution + texel.1 * resolution + texel.0
 }
@@ -254,15 +271,9 @@ fn get_dir(resolution: usize, index: usize) -> Option<na::Unit<na::Vector3<f32>>
     }
     let face = [Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ][index / face_size];
     let rem = index % face_size;
-    let texcoord = if resolution == 1 {
-        na::Point2::new(0.5, 0.5)
-    } else {
-        let y = rem / resolution;
-        let x = rem % resolution;
-        na::Point2::new(x as f32, y as f32) / ((resolution - 1) as f32)
-    };
-    let on_z = texcoord * 2.0 - na::Vector2::new(1.0, 1.0);
-    Some(face.direction(&on_z))
+    let y = (rem / resolution) as u32;
+    let x = (rem % resolution) as u32;
+    Some(Coords { x, y, face }.center(resolution as u32))
 }
 
 #[cfg(test)]

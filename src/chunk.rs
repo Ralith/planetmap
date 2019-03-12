@@ -248,7 +248,7 @@ impl Coords {
         ]
     }
 
-    /// Select all `Coord`s intersecting a cone opening towards `direction` with half-angle `theta`
+    /// Select all `Coords` intersecting a cone opening towards `direction` with half-angle `theta`
     pub fn neighborhood(
         resolution: u32,
         direction: na::Vector3<f32>,
@@ -294,6 +294,17 @@ impl Coords {
                     })
                 })
             })
+    }
+
+    /// The approximate direction represented by these coordinates
+    pub fn center<N: Real>(&self, resolution: u32) -> na::Unit<na::Vector3<N>> {
+        let texcoord = if resolution == 1 {
+            na::Point2::new(0.5, 0.5)
+        } else {
+            na::Point2::new(self.x as f64, self.y as f64) / ((resolution - 1) as f64)
+        };
+        let on_z = texcoord * 2.0 - na::Vector2::new(1.0, 1.0);
+        self.face.direction(&na::convert::<_, na::Point2<N>>(on_z))
     }
 }
 
