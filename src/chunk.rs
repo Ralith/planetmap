@@ -1,30 +1,45 @@
-#[cfg(feature = "simd")]
-use simdeez::Simd;
+use std::cmp::Ordering;
 #[cfg(feature = "simd")]
 use std::marker::PhantomData;
 use std::ops::Neg;
 use std::{fmt, mem};
 
+#[cfg(feature = "simd")]
+use simdeez::Simd;
+
 use na::Real;
+
+use crate::addressing;
 
 /// A node of a quadtree on a particular cubemap face
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Chunk {
     /// Coordinates within the set of nodes at this depth in the quadtree
-    pub coords: (u32, u32),
+    pub coords: Coords,
     /// Depth in the quadtree
     pub depth: u8,
-    /// Cubemap face on which the quadtree lies
-    pub face: Face,
 }
 
 impl Chunk {
     /// The top-level chunk corresponding to a particular cubemap face
     pub fn root(face: Face) -> Self {
         Self {
-            coords: (0, 0),
+            coords: Coords { x: 0, y: 0, face },
             depth: 0,
-            face,
+        }
+    }
+
+    /// Compute the chunk at `depth` that intersects the vector from the origin towards `dir`
+    pub fn from_vector(dir: &na::Vector3<f32>, depth: u8) -> Self {
+        let (face, texcoords) = Face::coords(dir);
+        let coords = addressing::discretize(2u32.pow(depth as u32) as usize, &texcoords);
+        Self {
+            coords: Coords {
+                x: coords.0 as u32,
+                y: coords.1 as u32,
+                face,
+            },
+            depth,
         }
     }
 
@@ -32,9 +47,12 @@ impl Chunk {
     pub fn parent(&self) -> Option<Self> {
         let depth = self.depth.checked_sub(1)?;
         Some(Self {
-            coords: (self.coords.0 / 2, self.coords.1 / 2),
+            coords: Coords {
+                x: self.coords.x / 2,
+                y: self.coords.y / 2,
+                face: self.coords.face,
+            },
             depth,
-            face: self.face,
         })
     }
 
@@ -46,95 +64,52 @@ impl Chunk {
     /// The largest chunks contained by this chunk
     pub fn children(&self) -> [Self; 4] {
         let depth = self.depth + 1;
-        let coords = (self.coords.0 * 2, self.coords.1 * 2);
-        let face = self.face;
+        let (x, y) = (self.coords.x * 2, self.coords.y * 2);
+        let face = self.coords.face;
         [
             Chunk {
-                coords,
+                coords: Coords { x, y, face },
                 depth,
-                face,
             },
             Chunk {
-                coords: (coords.0, coords.1 + 1),
+                coords: Coords { x, y: y + 1, face },
                 depth,
-                face,
             },
             Chunk {
-                coords: (coords.0 + 1, coords.1),
+                coords: Coords { x: x + 1, y, face },
                 depth,
-                face,
             },
             Chunk {
-                coords: (coords.0 + 1, coords.1 + 1),
+                coords: Coords {
+                    x: x + 1,
+                    y: y + 1,
+                    face,
+                },
                 depth,
-                face,
             },
         ]
     }
 
     /// Chunks that share an edge with this chunk
     pub fn neighbors(&self) -> [Self; 4] {
-        let Chunk {
-            face,
-            depth,
-            coords,
-        } = *self;
-        let max = 2u32.pow(self.depth as u32) - 1;
-        let neighbor_chunk = |face: Face, edge: Edge| {
-            let (neighboring_face, neighbor_edge, parallel_axis) = face.neighbors()[edge as usize];
-            let other = match edge {
-                Edge::NX | Edge::PX => coords.1,
-                Edge::NY | Edge::PY => coords.0,
-            };
-            let other = if parallel_axis { other } else { max - other };
-            let coords = match neighbor_edge {
-                Edge::NX => (0, other),
-                Edge::NY => (other, 0),
-                Edge::PX => (max, other),
-                Edge::PY => (other, max),
-            };
-            Chunk {
-                face: neighboring_face,
-                depth,
-                coords,
-            }
-        };
+        let x = self.coords.neighbors(2u32.pow(self.depth as u32));
+        let depth = self.depth;
         [
-            if coords.0 == 0 {
-                neighbor_chunk(face, Edge::NX)
-            } else {
-                Chunk {
-                    face,
-                    depth,
-                    coords: (coords.0 - 1, coords.1),
-                }
+            Chunk {
+                coords: x[0],
+                depth,
             },
-            if coords.1 == 0 {
-                neighbor_chunk(face, Edge::NY)
-            } else {
-                Chunk {
-                    face,
-                    depth,
-                    coords: (coords.0, coords.1 - 1),
-                }
+            Chunk {
+                coords: x[1],
+                depth,
             },
-            if coords.0 == max {
-                neighbor_chunk(face, Edge::PX)
-            } else {
-                Chunk {
-                    face,
-                    depth,
-                    coords: (coords.0 + 1, coords.1),
-                }
+            Chunk {
+                coords: x[2],
+                depth,
             },
-            if coords.1 == max {
-                neighbor_chunk(face, Edge::PY)
-            } else {
-                Chunk {
-                    face,
-                    depth,
-                    coords: (coords.0, coords.1 + 1),
-                }
+            Chunk {
+                coords: x[3],
+                depth,
             },
         ]
     }
@@ -150,9 +125,9 @@ impl Chunk {
     pub fn origin_on_face<R: Real>(&self) -> na::Unit<na::Vector3<R>> {
         let size = self.edge_length::<R>();
         let vec = na::Vector3::new(
-            (na::convert::<_, R>(self.coords.0 as f64) + na::convert::<_, R>(0.5)) * size
+            (na::convert::<_, R>(self.coords.x as f64) + na::convert::<_, R>(0.5)) * size
                 - na::convert(1.0),
-            (na::convert::<_, R>(self.coords.1 as f64) + na::convert::<_, R>(0.5)) * size
+            (na::convert::<_, R>(self.coords.y as f64) + na::convert::<_, R>(0.5)) * size
                 - na::convert(1.0),
             na::convert(1.0),
         );
@@ -195,9 +170,126 @@ impl Chunk {
     ) -> (na::Point3<f32>, na::IsometryMatrix3<f32>) {
         let origin =
             na::convert::<_, na::Vector3<f32>>(sphere_radius * self.origin_on_face().into_inner());
-        let world =
-            self.face.basis() * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
+        let world = self.coords.face.basis()
+            * na::Translation3::from(na::convert::<_, na::Vector3<f64>>(origin));
         (na::Point3::from(origin), na::convert(view * world))
+    }
+
+    /// Compute the direction identified by a [0..1]^2 vector on this chunk
+    pub fn direction<N: Real>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+        let edge_length = self.edge_length::<N>();
+        let origin_on_face = na::Point2::from(
+            na::convert::<_, na::Vector2<N>>(na::Vector2::new(
+                self.coords.x as f64,
+                self.coords.y as f64,
+            )) * edge_length,
+        ) - na::convert::<_, na::Vector2<N>>(na::Vector2::new(1.0, 1.0));
+        let pos_on_face = origin_on_face + coords.coords * edge_length;
+        self.coords.face.direction(&pos_on_face)
+    }
+}
+
+/// Coordinates in a discretized cubemap
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Coords {
+    pub x: u32,
+    pub y: u32,
+    pub face: Face,
+}
+
+impl Coords {
+    pub fn neighbors(&self, resolution: u32) -> [Self; 4] {
+        let Coords { x, y, face } = *self;
+        let max = resolution - 1;
+        let neighbor_chunk = |face: Face, edge: Edge| {
+            let (neighboring_face, neighbor_edge, parallel_axis) = face.neighbors()[edge as usize];
+            let other = match edge {
+                Edge::NX | Edge::PX => y,
+                Edge::NY | Edge::PY => x,
+            };
+            let other = if parallel_axis { other } else { max - other };
+            let (x, y) = match neighbor_edge {
+                Edge::NX => (0, other),
+                Edge::NY => (other, 0),
+                Edge::PX => (max, other),
+                Edge::PY => (other, max),
+            };
+            Coords {
+                x,
+                y,
+                face: neighboring_face,
+            }
+        };
+        [
+            if x == 0 {
+                neighbor_chunk(face, Edge::NX)
+            } else {
+                Coords { x: x - 1, y, face }
+            },
+            if y == 0 {
+                neighbor_chunk(face, Edge::NY)
+            } else {
+                Coords { x, y: y - 1, face }
+            },
+            if x == max {
+                neighbor_chunk(face, Edge::PX)
+            } else {
+                Coords { x: x + 1, y, face }
+            },
+            if y == max {
+                neighbor_chunk(face, Edge::PY)
+            } else {
+                Coords { x, y: y + 1, face }
+            },
+        ]
+    }
+
+    /// Select all `Coord`s intersecting a cone opening towards `direction` with half-angle `theta`
+    pub fn neighborhood(
+        resolution: u32,
+        direction: na::Vector3<f32>,
+        theta: f32,
+    ) -> impl Iterator<Item = Self> {
+        fn remap(x: f32) -> f32 {
+            (na::clamp(x, -1.0, 1.0) + 1.0) / 2.0
+        }
+        Face::iter()
+            .filter(move |f| {
+                (f.basis() * na::Vector3::z())
+                    .dot(&direction)
+                    .is_sign_positive()
+            })
+            .map(move |face| {
+                let local = face.basis().inverse() * &direction;
+                let local = local.xy() / local.z;
+                let theta_m_x = local.x.atan();
+                let x_lower = (theta_m_x - theta).tan();
+                let x_upper = (theta_m_x + theta).tan();
+                let theta_m_y = local.y.atan();
+                let y_lower = (theta_m_y - theta).tan();
+                let y_upper = (theta_m_y + theta).tan();
+                (face, (x_lower, y_lower), (x_upper, y_upper))
+            })
+            .filter(|(_, lower, upper)| {
+                lower.0 <= 1.0 && lower.1 <= 1.0 && upper.0 >= -1.0 && upper.1 >= -1.0
+            })
+            .flat_map(move |(face, lower, upper)| {
+                let (x_lower, y_lower) = addressing::discretize(
+                    resolution as usize,
+                    &na::Point2::new(remap(lower.0), remap(lower.1)),
+                );
+                let (x_upper, y_upper) = addressing::discretize(
+                    resolution as usize,
+                    &na::Point2::new(remap(upper.0), remap(upper.1)),
+                );
+                (y_lower..=y_upper).flat_map(move |y| {
+                    (x_lower..=x_upper).map(move |x| Self {
+                        x: x as u32,
+                        y: y as u32,
+                        face,
+                    })
+                })
+            })
     }
 }
 
@@ -255,17 +347,24 @@ impl Face {
         let (&value, &axis) = x
             .iter()
             .zip(&[Face::PX, Face::PY, Face::PZ])
-            .max_by(|(l, _), (r, _)| {
-                l.abs()
-                    .partial_cmp(&r.abs())
-                    .unwrap_or(std::cmp::Ordering::Less)
-            })
+            .max_by(|(l, _), (r, _)| l.abs().partial_cmp(&r.abs()).unwrap_or(Ordering::Less))
             .unwrap();
         if value.is_sign_negative() {
             -axis
         } else {
             axis
         }
+    }
+
+    /// Compute which `Face` a vector intersects, and where the intersection lies
+    pub fn coords<N: Real>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
+        let face = Self::from_vector(x);
+        let wrt_face = face.basis().inverse() * x;
+        (
+            face,
+            na::Point2::from(wrt_face.xy() * (na::convert::<_, N>(0.5) / wrt_face.z))
+                + na::convert::<_, na::Vector2<N>>(na::Vector2::new(0.5, 0.5)),
+        )
     }
 
     /// Transform from face space (facing +Z) to sphere space (facing the named axis).
@@ -336,7 +435,7 @@ impl Face {
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this face
-    pub fn direction<N: Real>(&self, coords: &na::Vector2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: Real>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
         let dir_z = na::Unit::new_normalize(na::Vector3::new(coords.x, coords.y, N::one()));
         self.basis() * dir_z
     }
@@ -386,20 +485,15 @@ impl Iterator for SampleIter {
         if self.index >= self.resolution * self.resolution {
             return None;
         }
-        let edge_length = self.chunk.edge_length::<f32>();
-        let origin_on_face =
-            na::Vector2::new(self.chunk.coords.0 as f32, self.chunk.coords.1 as f32) * edge_length
-                - na::Vector2::new(1.0, 1.0);
         let max = self.resolution - 1;
-        let offset = if max == 0 {
-            na::Vector2::new(0.5, 0.5) * edge_length
+        let coords = if max == 0 {
+            na::Point2::new(0.5, 0.5)
         } else {
-            let step = edge_length / max as f32;
+            let step = 1.0 / max as f32;
             let (x, y) = (self.index % self.resolution, self.index / self.resolution);
-            na::Vector2::new(x as f32, y as f32) * step
+            na::Point2::new(x as f32, y as f32) * step
         };
-        let pos_on_face = origin_on_face + offset;
-        let dir = self.chunk.face.direction(&pos_on_face);
+        let dir = self.chunk.direction(&coords);
         self.index += 1;
         Some(dir)
     }
@@ -440,12 +534,12 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
         unsafe {
             let edge_length = S::set1_ps(self.chunk.edge_length::<f32>());
             let origin_on_face_x = S::fmsub_ps(
-                S::set1_ps(self.chunk.coords.0 as f32),
+                S::set1_ps(self.chunk.coords.x as f32),
                 edge_length,
                 S::set1_ps(1.0),
             );
             let origin_on_face_y = S::fmsub_ps(
-                S::set1_ps(self.chunk.coords.1 as f32),
+                S::set1_ps(self.chunk.coords.y as f32),
                 edge_length,
                 S::set1_ps(1.0),
             );
@@ -580,40 +674,55 @@ mod test {
         assert_eq!(
             chunk.neighbors()[0],
             Chunk {
-                coords: (0, 1),
+                coords: Coords {
+                    x: 0,
+                    y: 1,
+                    face: NX
+                },
                 depth: 1,
-                face: NX
             }
         );
         assert_eq!(
             chunk.neighbors()[1],
             Chunk {
-                coords: (0, 1),
+                coords: Coords {
+                    x: 0,
+                    y: 1,
+                    face: NY
+                },
                 depth: 1,
-                face: NY
             }
         );
         assert_eq!(
             chunk.neighbors()[2],
             Chunk {
-                coords: (1, 0),
+                coords: Coords {
+                    x: 1,
+                    y: 0,
+                    face: PZ
+                },
                 depth: 1,
-                face: PZ
             }
         );
         assert_eq!(
             chunk.neighbors()[3],
             Chunk {
-                coords: (0, 1),
+                coords: Coords {
+                    x: 0,
+                    y: 1,
+                    face: PZ
+                },
                 depth: 1,
-                face: PZ
             }
         );
 
         let chunk = Chunk {
-            face: PX,
             depth: 1,
-            coords: (1, 0),
+            coords: Coords {
+                x: 1,
+                y: 0,
+                face: PX,
+            },
         };
         assert_eq!(chunk.neighbors()[0b01].neighbors()[0b10], chunk);
 
@@ -690,9 +799,12 @@ mod test {
     #[test]
     fn sample_lod_boundaries() {
         let chunk = Chunk {
-            face: Face::PZ,
             depth: 10,
-            coords: (12, 34),
+            coords: Coords {
+                x: 12,
+                y: 34,
+                face: Face::PZ,
+            },
         };
         let children = chunk.children();
         let neighbor = chunk.neighbors()[0];
@@ -736,5 +848,93 @@ mod test {
                 assert_eq!(z[i], reference.z);
             }
         }
+    }
+
+    #[test]
+    fn face_coord_sanity() {
+        assert_eq!(
+            Face::coords(&na::Vector3::x()),
+            (Face::PX, na::Point2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            Face::coords(&na::Vector3::y()),
+            (Face::PY, na::Point2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            Face::coords(&na::Vector3::z()),
+            (Face::PZ, na::Point2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            Face::coords(&-na::Vector3::x()),
+            (Face::NX, na::Point2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            Face::coords(&-na::Vector3::y()),
+            (Face::NY, na::Point2::new(0.5, 0.5))
+        );
+        assert_eq!(
+            Face::coords(&-na::Vector3::z()),
+            (Face::NZ, na::Point2::new(0.5, 0.5))
+        );
+    }
+
+    #[test]
+    fn coord_neighborhood() {
+        use Face::*;
+        for face in Face::iter() {
+            let center = face.basis() * na::Vector3::z();
+            assert_eq!(
+                Coords::neighborhood(1, center, 0.1).collect::<Vec<_>>(),
+                vec![Coords { x: 0, y: 0, face }]
+            );
+            assert_eq!(
+                Coords::neighborhood(3, center, 0.1).collect::<Vec<_>>(),
+                vec![Coords { x: 1, y: 1, face }]
+            );
+            let xs = Coords::neighborhood(2, center, 0.1).collect::<Vec<_>>();
+            assert_eq!(xs.len(), 4);
+            for expected in (0..2).flat_map(|y| (0..2).map(move |x| Coords { x, y, face })) {
+                assert!(xs.contains(&expected));
+            }
+        }
+        assert_eq!(
+            Coords::neighborhood(1, na::Vector3::new(1.0, 1.0, 1.0), 0.1).collect::<Vec<_>>(),
+            vec![
+                Coords {
+                    x: 0,
+                    y: 0,
+                    face: PX
+                },
+                Coords {
+                    x: 0,
+                    y: 0,
+                    face: PY
+                },
+                Coords {
+                    x: 0,
+                    y: 0,
+                    face: PZ
+                }
+            ]
+        );
+        assert_eq!(
+            Coords::neighborhood(1, na::Vector3::new(1.0, 1.0, 0.0), 0.1).collect::<Vec<_>>(),
+            vec![
+                Coords {
+                    x: 0,
+                    y: 0,
+                    face: PX
+                },
+                Coords {
+                    x: 0,
+                    y: 0,
+                    face: PY
+                },
+            ]
+        );
+        assert_eq!(
+            Coords::neighborhood(5, na::Vector3::new(1.0, 1.0, 1.0), 0.1).count(),
+            3
+        );
     }
 }

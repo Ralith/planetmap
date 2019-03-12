@@ -1,8 +1,8 @@
-use std::cmp::Ordering;
 use std::ops::{Index, IndexMut};
 use std::{iter, vec};
 
 use crate::chunk::Face;
+use crate::addressing::discretize;
 
 /// A dense, fixed-resolution cube map
 ///
@@ -115,28 +115,9 @@ impl<'a, T> IndexMut<&'a na::Unit<na::Vector3<f32>>> for CubeMap<T> {
 }
 
 fn index(resolution: usize, x: &na::Unit<na::Vector3<f32>>) -> usize {
-    let (face, texcoords) = coords(x);
+    let (face, texcoords) = Face::coords(x.as_ref());
     let texel = discretize(resolution, &texcoords);
     face as usize * resolution * resolution + texel.1 * resolution + texel.0
-}
-
-fn discretize(resolution: usize, texcoords: &na::Vector2<f32>) -> (usize, usize) {
-    let texcoords = texcoords * (resolution - 1) as f32 + na::Vector2::new(0.5, 0.5);
-    (texcoords.x as usize, texcoords.y as usize)
-}
-
-fn coords(x: &na::Unit<na::Vector3<f32>>) -> (Face, na::Vector2<f32>) {
-    let (&value, &axis) = x
-        .iter()
-        .zip(&[Face::PX, Face::PY, Face::PZ])
-        .max_by(|(l, _), (r, _)| l.abs().partial_cmp(&r.abs()).unwrap_or(Ordering::Less))
-        .unwrap();
-    let face = if value < 0.0 { -axis } else { axis };
-    let wrt_face = face.basis().inverse() * x;
-    (
-        face,
-        na::Vector2::new(wrt_face.x, wrt_face.y) * (0.5 / value) + na::Vector2::new(0.5, 0.5),
-    )
 }
 
 impl<T> IntoIterator for CubeMap<T> {
@@ -274,11 +255,11 @@ fn get_dir(resolution: usize, index: usize) -> Option<na::Unit<na::Vector3<f32>>
     let face = [Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ][index / face_size];
     let rem = index % face_size;
     let texcoord = if resolution == 1 {
-        na::Vector2::new(0.5, 0.5)
+        na::Point2::new(0.5, 0.5)
     } else {
         let y = rem / resolution;
         let x = rem % resolution;
-        na::Vector2::new(x as f32, y as f32) / ((resolution - 1) as f32)
+        na::Point2::new(x as f32, y as f32) / ((resolution - 1) as f32)
     };
     let on_z = texcoord * 2.0 - na::Vector2::new(1.0, 1.0);
     Some(face.direction(&on_z))
@@ -292,44 +273,6 @@ mod test {
     fn index_sanity() {
         const RES: usize = 2048;
         assert_eq!(index(RES, &na::Vector3::x_axis()), (RES / 2) * (RES + 1));
-    }
-
-    #[test]
-    fn coord_sanity() {
-        assert_eq!(
-            coords(&na::Vector3::x_axis()),
-            (Face::PX, na::Vector2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            coords(&na::Vector3::y_axis()),
-            (Face::PY, na::Vector2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            coords(&na::Vector3::z_axis()),
-            (Face::PZ, na::Vector2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            coords(&-na::Vector3::x_axis()),
-            (Face::NX, na::Vector2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            coords(&-na::Vector3::y_axis()),
-            (Face::NY, na::Vector2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            coords(&-na::Vector3::z_axis()),
-            (Face::NZ, na::Vector2::new(0.5, 0.5))
-        );
-    }
-
-    #[test]
-    fn discretize_sanity() {
-        assert_eq!(discretize(100, &na::Vector2::new(1.0, 1.0)), (99, 99));
-        assert_eq!(discretize(100, &na::Vector2::new(0.0, 0.0)), (0, 0));
-        assert_eq!(discretize(100, &na::Vector2::new(0.996, 0.996)), (99, 99));
-        assert_eq!(discretize(100, &na::Vector2::new(0.004, 0.004)), (0, 0));
-        assert_eq!(discretize(100, &na::Vector2::new(0.006, 0.006)), (1, 1));
-        assert_eq!(discretize(100, &na::Vector2::new(0.994, 0.994)), (98, 98));
     }
 
     #[test]

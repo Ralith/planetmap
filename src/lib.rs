@@ -1,3 +1,5 @@
+mod addressing;
+
 mod cubemap;
 pub use cubemap::CubeMap;
 

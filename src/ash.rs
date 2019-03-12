@@ -171,7 +171,7 @@ impl Cache {
                     mem.as_mut_ptr() as *mut _,
                     ChunkInstance {
                         worldview: worldview.to_homogeneous(),
-                        coords: [chunk.coords.0, chunk.coords.1],
+                        coords: [chunk.coords.x, chunk.coords.y],
                         depth: chunk.depth as u32,
                         slot,
                         origin,
