@@ -1,4 +1,4 @@
-use fxhash::{FxHashMap, FxHashSet};
+use hashbrown::{HashMap, HashSet};
 use std::ops::{Index, IndexMut};
 
 use na;
@@ -50,7 +50,7 @@ impl Config {
 /// Helper for streaming `Chunk`-oriented LoD into a fixed-size cache
 pub struct Manager {
     chunks: Slab<Slot>,
-    index: FxHashMap<Chunk, u32>,
+    index: HashMap<Chunk, u32>,
     config: Config,
 }
 
@@ -59,7 +59,7 @@ impl Manager {
     pub fn new(slots: usize, config: Config) -> Self {
         Self {
             chunks: Slab::with_capacity(slots),
-            index: FxHashMap::with_capacity_and_hasher(slots, Default::default()),
+            index: HashMap::with_capacity(slots),
             config,
         }
     }
@@ -225,7 +225,7 @@ impl Walker {
             .render
             .iter()
             .map(|&(chunk, _, _)| chunk)
-            .collect::<FxHashSet<_>>();
+            .collect::<HashSet<_>>();
         for &mut (chunk, ref mut neighborhood, _) in &mut self.out.render {
             use chunk::Edge;
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {

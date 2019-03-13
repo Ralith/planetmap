@@ -1,7 +1,7 @@
-use std::collections::hash_map;
 use std::sync::{Arc, Mutex};
 
-use fxhash::FxHashMap;
+use hashbrown::hash_map;
+use hashbrown::HashMap;
 use lru::LruCache;
 use na::Real;
 use ncollide3d::{
@@ -295,7 +295,7 @@ impl Iterator for ChunkTriangles<'_> {
 
 pub struct PlanetManifoldGenerator {
     flip: bool,
-    state: FxHashMap<(Coords, usize), TriangleData>,
+    state: HashMap<(Coords, usize), TriangleData>,
     color: bool,
 }
 
@@ -304,7 +304,7 @@ impl PlanetManifoldGenerator {
     pub fn new(flip: bool) -> Self {
         Self {
             flip,
-            state: FxHashMap::default(),
+            state: HashMap::new(),
             color: false,
         }
     }
