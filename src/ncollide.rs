@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use lru::LruCache;
 use na::Real;
 use ncollide3d::{
-    bounding_volume::{BoundingSphere, HasBoundingVolume, AABB},
+    bounding_volume::{BoundingSphere, BoundingVolume, HasBoundingVolume, AABB},
     narrow_phase::{ContactAlgorithm, ContactDispatcher, ContactManifoldGenerator},
     query::{
         Contact, ContactKinematic, ContactManifold, ContactPrediction, ContactPreprocessor,
@@ -46,6 +46,8 @@ impl Terrain for FlatTerrain {
 }
 
 /// A fixed-resolution partially-resident radial heightmap
+///
+/// Generates height data on-demand via `Terrain`, storing it in a fixed-size LRU cache.
 pub struct Planet {
     terrain: Arc<dyn Terrain>,
     radius: f32,
@@ -345,8 +347,12 @@ impl PlanetManifoldGenerator {
                 // Short-circuit if `other` is way above this chunk
                 continue;
             }
-            for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples).enumerate() {
-                // Could short-circuit here using dot(coord, dir)
+            // Future work: there might be a good way to filter triangles before actually computing
+            // them
+            for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples)
+                .enumerate()
+                .filter(|(_, tri)| tri.bounding_sphere(ma).intersects(&bounds))
+            {
                 let tri = match self.state.entry((coords, i)) {
                     hash_map::Entry::Occupied(mut e) => {
                         e.get_mut().color = color;
