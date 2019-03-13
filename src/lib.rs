@@ -11,3 +11,6 @@ pub use cache::Manager as CacheManager;
 
 #[cfg(feature = "ash")]
 pub mod ash;
+
+#[cfg(feature = "ncollide")]
+pub mod ncollide;

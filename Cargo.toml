@@ -11,6 +11,7 @@ all-features = true
 
 [features]
 simd = ["simdeez"]
+ncollide = ["ncollide3d", "lru"]
 
 [dependencies]
 na = { package = "nalgebra", version = "0.17.2" }
@@ -18,6 +19,8 @@ slab = "0.4.2"
 fxhash = "0.2"
 ash = { version = "0.27.1", optional = true }
 simdeez = { version = "0.6.1", optional = true }
+ncollide3d = { version = "0.18", optional = true }
+lru = { version = "0.1", optional = true }
 
 [dev-dependencies]
 winit = "0.18.1"
