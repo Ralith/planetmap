@@ -372,12 +372,28 @@ impl PlanetManifoldGenerator {
                 };
                 if !self.flip {
                     tri.algo.generate_contacts(
-                        dispatcher, ma, &triangle, Some(&proc1), mb, other, proc2, prediction, id_alloc,
+                        dispatcher,
+                        ma,
+                        &triangle,
+                        Some(&proc1),
+                        mb,
+                        other,
+                        proc2,
+                        prediction,
+                        id_alloc,
                         manifold,
                     );
                 } else {
                     tri.algo.generate_contacts(
-                        dispatcher, mb, other, proc2, ma, &triangle, Some(&proc1), prediction, id_alloc,
+                        dispatcher,
+                        mb,
+                        other,
+                        proc2,
+                        ma,
+                        &triangle,
+                        Some(&proc1),
+                        prediction,
+                        id_alloc,
                         manifold,
                     );
                 }
@@ -491,9 +507,17 @@ impl<N: Real> ContactPreprocessor<N> for TriangleContactPreprocessor<'_, N> {
         is_first: bool,
     ) -> bool {
         if is_first {
-            kinematic.set_feature1(self.planet.feature_id(&self.coords, self.triangle, kinematic.feature1()));
+            kinematic.set_feature1(self.planet.feature_id(
+                &self.coords,
+                self.triangle,
+                kinematic.feature1(),
+            ));
         } else {
-            kinematic.set_feature2(self.planet.feature_id(&self.coords, self.triangle, kinematic.feature2()));
+            kinematic.set_feature2(self.planet.feature_id(
+                &self.coords,
+                self.triangle,
+                kinematic.feature2(),
+            ));
         }
 
         if let Some(x) = self.outer {
