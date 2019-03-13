@@ -129,12 +129,8 @@ impl Chunk {
     }
 
     /// Returns a grid of resolution^2 directions contained by the chunk, in scan-line order
-    pub fn samples(self, resolution: u32) -> SampleIter {
-        SampleIter {
-            chunk: self,
-            resolution,
-            index: 0,
-        }
+    pub fn samples(&self, resolution: u32) -> SampleIter {
+        self.coords.samples(self.resolution(), resolution)
     }
 
     /// Returns a grid of resolution^2 directions contained by the chunk, in scan-line order
@@ -142,13 +138,8 @@ impl Chunk {
     /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
     /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
     #[cfg(feature = "simd")]
-    pub fn samples_ps<S: Simd>(self, resolution: u32) -> SampleIterSimd<S> {
-        SampleIterSimd {
-            chunk: self,
-            resolution,
-            index: 0,
-            _simd: PhantomData,
-        }
+    pub fn samples_ps<S: Simd>(&self, resolution: u32) -> SampleIterSimd<S> {
+        self.coords.samples_ps(self.resolution(), resolution)
     }
 
     /// Compute the single-precision origin of the chunk relative to its side of the sphere, and a
@@ -174,7 +165,7 @@ impl Chunk {
         self.coords.direction(self.resolution(), coords)
     }
 
-    /// Number of samples along an edge, i.e. 2^depth
+    /// Number of chunks at this depth along a cubemap edge, i.e. 2^depth
     pub fn resolution(&self) -> u32 { 2u32.pow(self.depth as u32) }
 }
 
@@ -320,6 +311,32 @@ impl Coords {
     pub fn edge_length<N: Real>(resolution: u32) -> N {
         na::convert::<_, N>(2.0) / na::convert::<_, N>(resolution as f64)
     }
+
+    /// Returns a grid of resolution^2 directions contained by these coords, in scan-line order
+    pub fn samples(&self, face_resolution: u32, chunk_resolution: u32) -> SampleIter {
+        SampleIter {
+            coords: *self,
+            face_resolution,
+            chunk_resolution,
+            index: 0,
+        }
+    }
+
+    /// Returns a grid of resolution^2 directions contained by these coords, in scan-line order
+    ///
+    /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
+    /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
+    #[cfg(feature = "simd")]
+    pub fn samples_ps<S: Simd>(&self, face_resolution: u32, chunk_resolution: u32) -> SampleIterSimd<S> {
+        SampleIterSimd {
+            coords: *self,
+            face_resolution,
+            chunk_resolution,
+            index: 0,
+            _simd: PhantomData,
+        }
+    }
+
 }
 
 /// Face of a cube map, identified by direction
@@ -503,32 +520,33 @@ impl Neg for Edge {
 /// Iterator over sample points distributed in a regular grid across a chunk, including its edges
 #[derive(Debug)]
 pub struct SampleIter {
-    chunk: Chunk,
-    resolution: u32,
+    coords: Coords,
+    face_resolution: u32,
+    chunk_resolution: u32,
     index: u32,
 }
 
 impl Iterator for SampleIter {
     type Item = na::Unit<na::Vector3<f32>>;
     fn next(&mut self) -> Option<na::Unit<na::Vector3<f32>>> {
-        if self.index >= self.resolution * self.resolution {
+        if self.index >= self.chunk_resolution * self.chunk_resolution {
             return None;
         }
-        let max = self.resolution - 1;
+        let max = self.chunk_resolution - 1;
         let coords = if max == 0 {
             na::Point2::new(0.5, 0.5)
         } else {
             let step = 1.0 / max as f32;
-            let (x, y) = (self.index % self.resolution, self.index / self.resolution);
+            let (x, y) = (self.index % self.chunk_resolution, self.index / self.chunk_resolution);
             na::Point2::new(x as f32, y as f32) * step
         };
-        let dir = self.chunk.direction(&coords);
+        let dir = self.coords.direction(self.face_resolution, &coords);
         self.index += 1;
         Some(dir)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let total = self.resolution * self.resolution;
+        let total = self.chunk_resolution * self.chunk_resolution;
         let remaining = (total - self.index) as usize;
         (remaining, Some(remaining))
     }
@@ -536,7 +554,7 @@ impl Iterator for SampleIter {
 
 impl ExactSizeIterator for SampleIter {
     fn len(&self) -> usize {
-        let total = self.resolution * self.resolution;
+        let total = self.chunk_resolution * self.chunk_resolution;
         (total - self.index) as usize
     }
 }
@@ -547,8 +565,9 @@ impl ExactSizeIterator for SampleIter {
 #[cfg(feature = "simd")]
 #[derive(Debug)]
 pub struct SampleIterSimd<S> {
-    chunk: Chunk,
-    resolution: u32,
+    coords: Coords,
+    face_resolution: u32,
+    chunk_resolution: u32,
     index: u32,
     _simd: PhantomData<S>,
 }
@@ -557,22 +576,22 @@ pub struct SampleIterSimd<S> {
 impl<S: Simd> Iterator for SampleIterSimd<S> {
     type Item = [S::Vf32; 3];
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.resolution * self.resolution {
+        if self.index >= self.chunk_resolution * self.chunk_resolution {
             return None;
         }
         unsafe {
-            let edge_length = S::set1_ps(self.chunk.edge_length::<f32>());
+            let edge_length = S::set1_ps(Coords::edge_length::<f32>(self.face_resolution));
             let origin_on_face_x = S::fmsub_ps(
-                S::set1_ps(self.chunk.coords.x as f32),
+                S::set1_ps(self.coords.x as f32),
                 edge_length,
                 S::set1_ps(1.0),
             );
             let origin_on_face_y = S::fmsub_ps(
-                S::set1_ps(self.chunk.coords.y as f32),
+                S::set1_ps(self.coords.y as f32),
                 edge_length,
                 S::set1_ps(1.0),
             );
-            let max = self.resolution - 1;
+            let max = self.chunk_resolution - 1;
             let (offset_x, offset_y) = if max == 0 {
                 let v = S::set1_ps(0.5) * edge_length;
                 (v, v)
@@ -580,11 +599,11 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
                 let step = edge_length / S::set1_ps(max as f32);
                 let mut xs = S::setzero_ps();
                 for i in 0..S::VF32_WIDTH {
-                    xs[i] = ((self.index + i as u32) % self.resolution) as f32;
+                    xs[i] = ((self.index + i as u32) % self.chunk_resolution) as f32;
                 }
                 let mut ys = S::setzero_ps();
                 for i in 0..S::VF32_WIDTH {
-                    ys[i] = ((self.index + i as u32) / self.resolution) as f32;
+                    ys[i] = ((self.index + i as u32) / self.chunk_resolution) as f32;
                 }
                 (xs * step, ys * step)
             };
@@ -606,7 +625,7 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let total = self.resolution * self.resolution;
+        let total = self.chunk_resolution * self.chunk_resolution;
         let remaining = (total - self.index) as usize;
         let x = (remaining + S::VF32_WIDTH - 1) / S::VF32_WIDTH;
         (x, Some(x))
