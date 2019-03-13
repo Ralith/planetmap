@@ -1,3 +1,36 @@
+//! Collision detection for radial heightmaps
+//!
+//! Implement `Terrain` for your heightmap, then create colliders using it with a `Planet`. The
+//! `CollisionWorld` must be configured to use `PlanetManifoldGenerator`s for collision detection
+//! vs. `Planet`s, for example by using a `NarrowPhase` with a
+//! `PlanetDispatcher<DefaultContactDispatcher>`.
+//!
+//! # Example
+//!
+//! ```
+//! use std::sync::Arc;
+//! use planetmap::ncollide::{PlanetDispatcher, Planet, FlatTerrain};
+//! use ncollide3d::{
+//!     narrow_phase::{DefaultContactDispatcher, DefaultProximityDispatcher, NarrowPhase},
+//!     shape::ShapeHandle,
+//!     world::{CollisionGroups, CollisionWorld, GeometricQueryType},
+//! };
+//!
+//! let mut world = CollisionWorld::new(0.01);
+//! world.set_narrow_phase(NarrowPhase::new(
+//!     Box::new(PlanetDispatcher::new(DefaultContactDispatcher::new())),
+//!     Box::new(DefaultProximityDispatcher::new()),
+//! ));
+//!
+//! world.add(
+//!     na::Isometry3::identity(),
+//!     ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 5, 4)),
+//!     CollisionGroups::new(),
+//!     GeometricQueryType::Contacts(0.0, 0.0),
+//!     0,
+//! );
+//! ```
+
 use std::sync::{Arc, Mutex};
 
 use hashbrown::hash_map;
@@ -27,6 +60,7 @@ pub trait Terrain: Send + Sync + 'static {
     fn min_height(&self) -> f32;
 }
 
+/// Perfect sphere `Terrain` impl
 #[derive(Debug, Copy, Clone)]
 pub struct FlatTerrain;
 
@@ -47,7 +81,7 @@ impl Terrain for FlatTerrain {
 
 /// A fixed-resolution partially-resident radial heightmap
 ///
-/// Generates height data on-demand via `Terrain`, storing it in a fixed-size LRU cache.
+/// Generates height data on-demand via `Terrain`, preserving it in a fixed-size LRU cache.
 pub struct Planet {
     terrain: Arc<dyn Terrain>,
     radius: f32,
@@ -243,7 +277,7 @@ struct ChunkTriangles<'a> {
 }
 
 impl<'a> ChunkTriangles<'a> {
-    pub fn new(planet: &'a Planet, coords: Coords, samples: &'a [f32]) -> Self {
+    fn new(planet: &'a Planet, coords: Coords, samples: &'a [f32]) -> Self {
         Self {
             planet,
             samples,
@@ -296,6 +330,7 @@ impl Iterator for ChunkTriangles<'_> {
     }
 }
 
+/// Narrow-phase collision detection algorithm for `Planet`
 pub struct PlanetManifoldGenerator {
     flip: bool,
     state: HashMap<(Coords, usize), TriangleData>,
@@ -471,11 +506,13 @@ struct TriangleData {
     color: bool,
 }
 
+/// A `ContactDispatcher` that knows about `Planet`
 pub struct PlanetDispatcher<T> {
     inner: T,
 }
 
 impl<T> PlanetDispatcher<T> {
+    /// Construct a dispatcher that forwards unrecognized shape pairs to `inner`
     pub fn new(inner: T) -> Self {
         Self { inner }
     }
