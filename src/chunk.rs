@@ -86,7 +86,7 @@ impl Chunk {
 
     /// Chunks that share an edge with this chunk
     pub fn neighbors(&self) -> [Self; 4] {
-        let x = self.coords.neighbors(2u32.pow(self.depth as u32));
+        let x = self.coords.neighbors(self.resolution());
         let depth = self.depth;
         [
             Chunk {
@@ -109,19 +109,19 @@ impl Chunk {
     }
 
     /// Length of one of this chunk's edges before mapping onto the sphere
-    pub fn edge_length<R: Real>(&self) -> R {
-        na::convert::<_, R>(2.0) / na::convert::<_, R>(2u32.pow(self.depth as u32) as f64)
+    pub fn edge_length<N: Real>(&self) -> N {
+        Coords::edge_length(self.resolution())
     }
 
     /// Location of the center of this chunk on the surface of the sphere
     ///
     /// Transform by face.basis() to get world origin
-    pub fn origin_on_face<R: Real>(&self) -> na::Unit<na::Vector3<R>> {
-        let size = self.edge_length::<R>();
+    pub fn origin_on_face<N: Real>(&self) -> na::Unit<na::Vector3<N>> {
+        let size = self.edge_length::<N>();
         let vec = na::Vector3::new(
-            (na::convert::<_, R>(self.coords.x as f64) + na::convert::<_, R>(0.5)) * size
+            (na::convert::<_, N>(self.coords.x as f64) + na::convert::<_, N>(0.5)) * size
                 - na::convert(1.0),
-            (na::convert::<_, R>(self.coords.y as f64) + na::convert::<_, R>(0.5)) * size
+            (na::convert::<_, N>(self.coords.y as f64) + na::convert::<_, N>(0.5)) * size
                 - na::convert(1.0),
             na::convert(1.0),
         );
@@ -171,16 +171,11 @@ impl Chunk {
 
     /// Compute the direction identified by a [0..1]^2 vector on this chunk
     pub fn direction<N: Real>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
-        let edge_length = self.edge_length::<N>();
-        let origin_on_face = na::Point2::from(
-            na::convert::<_, na::Vector2<N>>(na::Vector2::new(
-                self.coords.x as f64,
-                self.coords.y as f64,
-            )) * edge_length,
-        ) - na::convert::<_, na::Vector2<N>>(na::Vector2::new(1.0, 1.0));
-        let pos_on_face = origin_on_face + coords.coords * edge_length;
-        self.coords.face.direction(&pos_on_face)
+        self.coords.direction(self.resolution(), coords)
     }
+
+    /// Number of samples along an edge, i.e. 2^depth
+    pub fn resolution(&self) -> u32 { 2u32.pow(self.depth as u32) }
 }
 
 /// Coordinates in a discretized cubemap
@@ -305,6 +300,25 @@ impl Coords {
         };
         let on_z = texcoord * 2.0 - na::Vector2::new(1.0, 1.0);
         self.face.direction(&na::convert::<_, na::Point2<N>>(on_z))
+    }
+
+    /// Compute the direction identified by a point in the [0..1]^2 area covered by these
+    /// coordinates
+    pub fn direction<N: Real>(&self, resolution: u32, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+        let edge_length = Self::edge_length::<N>(resolution);
+        let origin_on_face = na::Point2::from(
+            na::convert::<_, na::Vector2<N>>(na::Vector2::new(
+                self.x as f64,
+                self.y as f64,
+            )) * edge_length,
+        ) - na::convert::<_, na::Vector2<N>>(na::Vector2::new(1.0, 1.0));
+        let pos_on_face = origin_on_face + coords.coords * edge_length;
+        self.face.direction(&pos_on_face)
+    }
+
+    /// Length of the edge in cubemap space of the region covered by these coordinates
+    pub fn edge_length<N: Real>(resolution: u32) -> N {
+        na::convert::<_, N>(2.0) / na::convert::<_, N>(resolution as f64)
     }
 }
 
