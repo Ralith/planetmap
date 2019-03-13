@@ -53,7 +53,7 @@ pub struct Planet {
     radius: f32,
     face_resolution: u32,
     chunk_resolution: u32,
-    // Could preallocate an arena for height samples
+    // Future work: could preallocate an arena for height samples
     cache: Mutex<LruCache<Coords, ChunkData>>,
 }
 
@@ -100,7 +100,8 @@ impl Planet {
 
     fn feature_id(&self, coords: &Coords, triangle: usize, tri_feature: FeatureId) -> FeatureId {
         use FeatureId::*;
-        Unknown                 // TODO
+        // TODO
+        Unknown
         // match tri_feature {
         //     Vertex(n) => Vertex(triangle << 2 | n),
         //     Edge(n) => Edge(triangle << 2 | n),
@@ -330,7 +331,6 @@ impl PlanetManifoldGenerator {
         let bounds = other.bounding_sphere(mb);
         let dir = ma.inverse_transform_point(bounds.center()).coords;
         let distance = dir.norm();
-        // Future work: degenerate to ball for bounding spheres significantly larger than altitude range?
         let cache = &mut *planet.cache.lock().unwrap();
         for coords in Coords::neighborhood(
             planet.face_resolution,
@@ -347,8 +347,7 @@ impl PlanetManifoldGenerator {
                 // Short-circuit if `other` is way above this chunk
                 continue;
             }
-            // Future work: there might be a good way to filter triangles before actually computing
-            // them
+            // Future work: should be able to filter triangles before actually computing them
             for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples)
                 .enumerate()
                 .filter(|(_, tri)| tri.bounding_sphere(ma).intersects(&bounds))

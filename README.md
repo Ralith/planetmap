@@ -5,9 +5,9 @@ functions with dynamic level-of-detail.
 
 ## Terrain Rendering
 
-Planetmap is motivated by the desire for visualizing to-scale
-planetary terrain in real time on commodity hardware. To accomplish
-this, it addresses multiple challenges:
+Planetmap is motivated by the desire to model to-scale planetary
+terrain in real time on commodity hardware. To accomplish this, it
+addresses multiple challenges:
 
 - Dynamic level of detail
 - Streaming larger-than-memory or procedural heightmap data
@@ -38,10 +38,21 @@ convenient to generate vertexes on-demand on the GPU based on
 heightmap data and `Chunk` coordinates. `heightmap.glsl` provides an
 example of this suitable for use in a vertex shader.
 
+## Features
+
+- `ash` exposes a wrapper around `CacheManager` that simplifies
+  caching chunk data in Vulkan device-local memory based on a view
+  transform, using the Vulkan bindings by the same name
+- `ncollide` exposes helpers for nphysics-compatible collision
+  detection against the surface of a radial heightmap
+- `simd` exposes `simdeez`-based iterators for data-parallel
+  computation of sample coordinates within a `Chunk` or
+  `chunk::Coord`, useful for fast noise sampling
+
 ## Example
 
 Planetmap includes a simple, unoptimized Vulkan demo that can be
-launched with `cargo run --release --features=ash --example demo`. Use
+launched with `cargo run --release --all-features --example demo`. Use
 WASDRF and click-and-drag to move; velocity is proportional to
 altitude. For simplicity, it skips important optimizations such as
 generating and transferring chunks asynchronously in background
