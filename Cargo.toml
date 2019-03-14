@@ -29,7 +29,7 @@ vk-shader-macros = "0.1"
 memoffset = "0.2.1"
 half = "1.3.0"
 noise = "0.5.1"
-fuzzyblue = { git = "https://github.com/Ralith/fuzzyblue", rev = "6e582ea64016bd199d2dfcb0b32f2ce98157ebfd" }
+fuzzyblue = { git = "https://github.com/Ralith/fuzzyblue", rev = "39178518ca38c790bb5c1c857ad63221c2d63723" }
 
 [[bench]]
 name = "bench"

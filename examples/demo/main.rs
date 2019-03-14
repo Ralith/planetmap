@@ -2,6 +2,7 @@ mod planet;
 mod window;
 
 use std::ffi::CStr;
+use std::sync::Arc;
 use std::time::Instant;
 use std::{mem, slice};
 
@@ -30,7 +31,7 @@ const STAGING_BUFFER_LENGTH: u32 = 256;
 fn main() {
     unsafe {
         let mut base = ExampleBase::new(512, 512);
-        let planet = Planet::new();
+        let planet = Arc::new(Planet::new());
 
         let atmosphere_builder = fuzzyblue::Builder::new(
             &base.instance,
@@ -835,6 +836,25 @@ fn main() {
             let view = camera.inverse();
             let (instances, transfers) = cache.update(planet.radius() as f64, &view);
 
+            let (zenith, height) = na::Unit::new_and_get(camera.translation.vector);
+            let atmosphere_params = fuzzyblue::DrawParams {
+                inverse_viewproj: (*(uniforms.projection
+                                     * na::convert::<_, na::Isometry3<f32>>(view))
+                                   .inverse()
+                                   .matrix())
+                    .into(),
+                zenith: na::convert::<_, na::Vector3<f32>>(zenith.into_inner()).into(),
+                sun_direction: [0.0, 1.0, 0.0],
+                height: (height - planet.radius() as f64) as f32,
+                mie_anisotropy: fuzzyblue::MIE_ANISOTROPY_AIR,
+                // Scale down to usable SDR values
+                solar_irradiance: [
+                    fuzzyblue::SOL_IRRADIANCE[0] * 6e-3,
+                    fuzzyblue::SOL_IRRADIANCE[1] * 6e-3,
+                    fuzzyblue::SOL_IRRADIANCE[2] * 6e-3,
+                ],
+            };
+
             let mut transfer_slots = Vec::new();
             record_submit_commandbuffer(
                 &*base.device,
@@ -909,11 +929,15 @@ fn main() {
                             .unwrap();
                     }
 
+                    atmosphere_renderer.prepass(cmd, &atmosphere, &atmosphere_params, 0);
+
                     device.cmd_begin_render_pass(
                         cmd,
                         &render_pass_begin_info,
                         vk::SubpassContents::INLINE,
                     );
+                    device.cmd_set_viewport(cmd, 0, &viewports);
+                    device.cmd_set_scissor(cmd, 0, &scissors);
                     if instances > 0 {
                         device.cmd_bind_descriptor_sets(
                             cmd,
@@ -928,36 +952,16 @@ fn main() {
                             vk::PipelineBindPoint::GRAPHICS,
                             graphics_pipeline,
                         );
-                        device.cmd_set_viewport(cmd, 0, &viewports);
-                        device.cmd_set_scissor(cmd, 0, &scissors);
                         device.cmd_bind_vertex_buffers(cmd, 0, &[cache.instance_buffer()], &[0]);
                         device.cmd_draw(cmd, CHUNK_QUADS * CHUNK_QUADS * 6, instances, 0, 0);
                     }
 
                     device.cmd_next_subpass(cmd, vk::SubpassContents::INLINE);
 
-                    let (zenith, height) = na::Unit::new_and_get(camera.translation.vector);
                     atmosphere_renderer.draw(
                         cmd,
                         &atmosphere,
-                        &fuzzyblue::DrawParams {
-                            inverse_viewproj: (*(uniforms.projection
-                                * na::convert::<_, na::Isometry3<f32>>(view))
-                            .inverse()
-                            .matrix())
-                            .into(),
-                            zenith: na::convert::<_, na::Vector3<f32>>(zenith.into_inner()).into(),
-                            sun_direction: [0.0, 1.0, 0.0],
-                            height: (height - planet.radius() as f64) as f32,
-                            mie_anisotropy: fuzzyblue::MIE_ANISOTROPY_AIR,
-                            // Scale down to usable SDR values
-                            solar_irradiance: [
-                                fuzzyblue::SOL_IRRADIANCE[0] * 6e-3,
-                                fuzzyblue::SOL_IRRADIANCE[1] * 6e-3,
-                                fuzzyblue::SOL_IRRADIANCE[2] * 6e-3,
-                            ],
-                        },
-                        swapchain.extent,
+                        &atmosphere_params,
                         0,
                     );
                     device.cmd_end_render_pass(cmd);
