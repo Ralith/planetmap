@@ -45,12 +45,7 @@ impl Planet {
         let p = na::Point::from(
             na::convert::<_, na::Vector3<f64>>(dir.into_inner()) * self.radius as f64,
         );
-        let s = self.sample(p);
-        if s < 0.0 {
-            0.0
-        } else {
-            s as f32
-        }
+        self.sample(p) as f32
     }
 
     fn normal_at(&self, dir: &na::Unit<na::Vector3<f32>>) -> na::Unit<na::Vector3<f32>> {
@@ -78,7 +73,7 @@ impl Planet {
             height,
             &[
                 // deep ocean
-                ([0, 0, 0, 255], [0, 0, 128, 255], -1000.0, -10.0),
+                ([0, 0, 96, 255], [0, 0, 128, 255], -1000.0, -10.0),
                 // beach
                 ([0, 0, 128, 255], [192, 192, 128, 255], -10.0, 100.0),
                 ([192, 192, 128, 255], [192, 192, 128, 255], 100.0, 200.0),
