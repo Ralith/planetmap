@@ -134,7 +134,7 @@ impl Planet {
 
     fn feature_id(&self, coords: &Coords, triangle: usize, tri_feature: FeatureId) -> FeatureId {
         use FeatureId::*;
-        // TODO
+        // TODO: Maintain an index into the cache, kept alive by live manifold generators, for improved stability
         Unknown
         // match tri_feature {
         //     Vertex(n) => Vertex(triangle << 2 | n),
@@ -241,15 +241,9 @@ impl Shape<f64> for Planet {
         _deformations: Option<&[f64]>,
         _dir: &na::Unit<na::Vector3<f64>>,
     ) -> bool {
-        // FIXME
+        // TODO: Implementing this properly will improve stability
         false
     }
-
-    // #[inline]
-    // fn subshape_containing_feature(&self, _id: FeatureId) -> usize {
-    //     // FIXME
-    //     0
-    // }
 
     #[inline]
     fn as_point_query(&self) -> Option<&PointQuery<f64>> {
@@ -349,13 +343,13 @@ impl PlanetManifoldGenerator {
 
     fn run(
         &mut self,
-        dispatcher: &ContactDispatcher<f64>,
+        dispatcher: &dyn ContactDispatcher<f64>,
         ma: &na::Isometry3<f64>,
         planet: &Planet,
-        proc1: Option<&ContactPreprocessor<f64>>,
+        proc1: Option<&dyn ContactPreprocessor<f64>>,
         mb: &na::Isometry3<f64>,
         other: &dyn Shape<f64>,
-        proc2: Option<&ContactPreprocessor<f64>>,
+        proc2: Option<&dyn ContactPreprocessor<f64>>,
         prediction: &ContactPrediction<f64>,
         id_alloc: &mut IdAllocator,
         manifold: &mut ContactManifold<f64>,
@@ -363,7 +357,7 @@ impl PlanetManifoldGenerator {
         self.color ^= true;
         let color = self.color;
 
-        let bounds = other.bounding_sphere(mb);
+        let bounds = other.bounding_sphere(mb).loosened(prediction.linear());
         let dir = ma.inverse_transform_point(bounds.center()).coords;
         let distance = dir.norm();
         let cache = &mut *planet.cache.lock().unwrap();
@@ -447,13 +441,13 @@ impl PlanetManifoldGenerator {
 impl ContactManifoldGenerator<f64> for PlanetManifoldGenerator {
     fn generate_contacts(
         &mut self,
-        d: &ContactDispatcher<f64>,
+        d: &dyn ContactDispatcher<f64>,
         ma: &na::Isometry3<f64>,
         a: &dyn Shape<f64>,
-        proc1: Option<&ContactPreprocessor<f64>>,
+        proc1: Option<&dyn ContactPreprocessor<f64>>,
         mb: &na::Isometry3<f64>,
         b: &dyn Shape<f64>,
-        proc2: Option<&ContactPreprocessor<f64>>,
+        proc2: Option<&dyn ContactPreprocessor<f64>>,
         prediction: &ContactPrediction<f64>,
         id_alloc: &mut IdAllocator,
         manifold: &mut ContactManifold<f64>,
