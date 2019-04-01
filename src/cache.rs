@@ -4,7 +4,8 @@ use std::ops::{Index, IndexMut};
 use na;
 use slab::Slab;
 
-use crate::{chunk, Chunk};
+use crate::cubemap::{Edge, Face};
+use crate::Chunk;
 
 struct Slot {
     chunk: Chunk,
@@ -27,7 +28,7 @@ impl Default for Config {
 impl Config {
     /// Number of slots needed by this config to represent maximum detail for a worst-case viewpoint
     pub fn slots_needed(&self) -> usize {
-        chunk::Face::iter()
+        Face::iter()
             .map(Chunk::root)
             .map(|x| self.slots_needed_inner(&x))
             .sum()
@@ -162,10 +163,10 @@ pub struct Neighborhood {
     pub py: u8,
 }
 
-impl Index<chunk::Edge> for Neighborhood {
+impl Index<Edge> for Neighborhood {
     type Output = u8;
-    fn index(&self, edge: chunk::Edge) -> &u8 {
-        use chunk::Edge::*;
+    fn index(&self, edge: Edge) -> &u8 {
+        use Edge::*;
         match edge {
             NX => &self.nx,
             NY => &self.ny,
@@ -175,9 +176,9 @@ impl Index<chunk::Edge> for Neighborhood {
     }
 }
 
-impl IndexMut<chunk::Edge> for Neighborhood {
-    fn index_mut(&mut self, edge: chunk::Edge) -> &mut u8 {
-        use chunk::Edge::*;
+impl IndexMut<Edge> for Neighborhood {
+    fn index_mut(&mut self, edge: Edge) -> &mut u8 {
+        use Edge::*;
         match edge {
             NX => &mut self.nx,
             NY => &mut self.ny,
@@ -205,7 +206,7 @@ impl Walker {
 
     fn walk(&mut self, mgr: &Manager, viewpoints: &[na::Point3<f64>]) {
         // Gather the set of chunks we can should render and want to transfer
-        for chunk in chunk::Face::iter().map(Chunk::root) {
+        for chunk in Face::iter().map(Chunk::root) {
             let slot = mgr.get(&chunk);
             // Kick off the loop for each face's quadtree
             self.walk_inner(
@@ -227,7 +228,6 @@ impl Walker {
             .map(|&(chunk, _, _)| chunk)
             .collect::<HashSet<_>>();
         for &mut (chunk, ref mut neighborhood, _) in &mut self.out.render {
-            use chunk::Edge;
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
                 // Compute the LoD difference to the rendered neighbor on this edge, if any
                 if let Some(neighbor) = neighbor.path().find(|x| rendering.contains(&x)) {

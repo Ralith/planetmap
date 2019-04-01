@@ -48,7 +48,7 @@ use ncollide3d::{
     utils::IdAllocator,
 };
 
-use crate::chunk::Coords;
+use crate::cubemap::Coords;
 
 /// Height data source for `Planet`
 pub trait Terrain: Send + Sync + 'static {
@@ -572,7 +572,7 @@ mod tests {
         world::{CollisionGroups, CollisionWorld, GeometricQueryType},
     };
 
-    use crate::chunk::Face;
+    use crate::cubemap::Face;
 
     use super::*;
 

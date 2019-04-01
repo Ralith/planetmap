@@ -1,7 +1,11 @@
 use noise::{MultiFractal, NoiseFn};
 
 use half::f16;
-use planetmap::{chunk::{Face, Coords}, Chunk, ncollide::Terrain};
+use planetmap::{
+    cubemap::{Coords, Face},
+    ncollide::Terrain,
+    Chunk,
+};
 
 pub struct Planet {
     noise: noise::Fbm,

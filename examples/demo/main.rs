@@ -2,15 +2,15 @@ mod planet;
 mod window;
 
 use std::ffi::CStr;
+use std::sync::Arc;
 use std::time::Instant;
 use std::{mem, slice};
-use std::sync::Arc;
 
 use ash::vk;
 use half::f16;
 use memoffset::offset_of;
-use vk_shader_macros::include_glsl;
 use nphysics3d::object::Body;
+use vk_shader_macros::include_glsl;
 
 use planetmap::ash::ChunkInstance;
 
@@ -650,8 +650,8 @@ fn main() {
             ));
         let ball = {
             use ncollide3d::shape::{Ball, ShapeHandle};
-            use nphysics3d::object::{ColliderDesc, RigidBodyDesc};
             use nphysics3d::math::Velocity;
+            use nphysics3d::object::{ColliderDesc, RigidBodyDesc};
 
             let planet_shape = ShapeHandle::new(planetmap::ncollide::Planet::new(
                 planet.clone(),
