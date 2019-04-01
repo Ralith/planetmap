@@ -10,6 +10,7 @@ readme = "README.md"
 all-features = true
 
 [features]
+default = ["ash", "simd", "ncollide"]
 simd = ["simdeez"]
 ncollide = ["ncollide3d", "lru"]
 
