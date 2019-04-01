@@ -4,11 +4,13 @@ mod window;
 use std::ffi::CStr;
 use std::time::Instant;
 use std::{mem, slice};
+use std::sync::Arc;
 
 use ash::vk;
 use half::f16;
 use memoffset::offset_of;
 use vk_shader_macros::include_glsl;
+use nphysics3d::object::Body;
 
 use planetmap::ash::ChunkInstance;
 
@@ -30,7 +32,7 @@ const STAGING_BUFFER_LENGTH: u32 = 256;
 fn main() {
     unsafe {
         let mut base = ExampleBase::new(512, 512);
-        let planet = Planet::new();
+        let planet = Arc::new(Planet::new());
 
         let atmosphere_builder = fuzzyblue::Builder::new(
             &base.instance,
@@ -632,9 +634,45 @@ fn main() {
         let mut swapchain = SwapchainState::new(&base, renderpass, None);
 
         let mut camera = na::IsometryMatrix3::from_parts(
-            na::Translation3::from(na::Vector3::new(0.0, planet.radius() as f64 + 1e4, 0.0)),
+            na::Translation3::from(na::Vector3::new(0.0, planet.radius() as f64 + 5e3, 0.0)),
             na::Rotation3::identity(),
         );
+
+        let mut world = nphysics3d::world::World::<f64>::new();
+        world
+            .collider_world_mut()
+            .as_collision_world_mut()
+            .set_narrow_phase(ncollide3d::narrow_phase::NarrowPhase::new(
+                Box::new(planetmap::ncollide::PlanetDispatcher::new(
+                    ncollide3d::narrow_phase::DefaultContactDispatcher::new(),
+                )),
+                Box::new(ncollide3d::narrow_phase::DefaultProximityDispatcher::new()),
+            ));
+        let ball = {
+            use ncollide3d::shape::{Ball, ShapeHandle};
+            use nphysics3d::object::{ColliderDesc, RigidBodyDesc};
+            use nphysics3d::math::Velocity;
+
+            let planet_shape = ShapeHandle::new(planetmap::ncollide::Planet::new(
+                planet.clone(),
+                64 * 1024,
+                planet.radius(),
+                2u32.pow(12),
+                CHUNK_HEIGHT_SIZE,
+            ));
+            RigidBodyDesc::new()
+                .collider(&ColliderDesc::new(planet_shape))
+                .name("planet".to_owned())
+                .build(&mut world);
+
+            RigidBodyDesc::new()
+                .collider(&ColliderDesc::new(ShapeHandle::new(Ball::new(1.0))).density(1.0))
+                .translation(na::Vector3::new(0.0, planet.radius() as f64 + 10.0, 0.0))
+                .velocity(Velocity::linear(0.0, -10.0, 0.0))
+                .name("ball".to_owned())
+                .build(&mut world)
+                .handle()
+        };
 
         use winit::ElementState::*;
         let mut panning = Released;
@@ -650,6 +688,7 @@ fn main() {
         let mut walk = Released;
 
         let mut t0 = Instant::now();
+        let mut time_accum = 0.0;
         loop {
             let mut keep_going = true;
             base.events_loop.poll_events(|e| {
@@ -775,6 +814,17 @@ fn main() {
                 * if walk == Pressed { 1.0 / 3.0 } else { 1.0 };
             camera = camera
                 * na::Translation3::from(motion * dt * if speed > 1e8 { 1e8 } else { speed });
+
+            time_accum += dt;
+            if time_accum > world.timestep() {
+                world.step();
+                time_accum -= world.timestep();
+
+                let ball = world.rigid_body(ball).unwrap();
+                if ball.activation_status().is_active() {
+                    println!("{}", ball.position().translation.vector);
+                }
+            }
 
             let swapchain_suboptimal;
             let present_index = loop {

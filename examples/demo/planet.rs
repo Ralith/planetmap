@@ -1,7 +1,7 @@
 use noise::{MultiFractal, NoiseFn};
 
 use half::f16;
-use planetmap::{chunk::Face, Chunk};
+use planetmap::{chunk::{Face, Coords}, Chunk, ncollide::Terrain};
 
 pub struct Planet {
     noise: noise::Fbm,
@@ -100,10 +100,10 @@ impl Planet {
         let point: [f64; 3] = (p.coords * 5e-5).into();
         let lat = (p.z / self.radius as f64).abs();
         let h = ((1.0 + self.noise.get(point)).powi(3) - 1.0) * 1500.0 + (lat - 0.3) * 3000.0;
-        if h < -1000.0 {
-            -1000.0
+        if h < self.min_height() as f64 {
+            self.min_height() as f64
         } else {
-            h
+            h.min(self.max_height() as f64)
         }
     }
 }
@@ -125,4 +125,19 @@ fn blend(f: f32, ranges: &[([u8; 4], [u8; 4], f32, f32)]) -> [u8; 4] {
 
 fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 2] {
     [(normal.x * 127.0) as i8, (normal.y * 127.0) as i8]
+}
+
+impl Terrain for Planet {
+    fn max_height(&self) -> f32 {
+        10_000.0
+    }
+    fn min_height(&self) -> f32 {
+        0.0
+    }
+
+    fn sample(&self, resolution: u32, coords: &Coords, out: &mut [f32]) {
+        for (i, sample) in coords.samples(2u32.pow(12), resolution).enumerate() {
+            out[i] = self.height_at(&sample);
+        }
+    }
 }

@@ -10,9 +10,10 @@ readme = "README.md"
 all-features = true
 
 [features]
-default = ["ash", "simd", "ncollide"]
+default = ["ash", "simd", "ncollide", "nphysics"]
 simd = ["simdeez"]
 ncollide = ["ncollide3d", "lru"]
+nphysics = ["nphysics3d"]
 
 [dependencies]
 na = { package = "nalgebra", version = "0.18" }
@@ -21,6 +22,7 @@ hashbrown = "0.1"
 ash = { version = "0.27.1", optional = true }
 simdeez = { version = "0.6.1", optional = true }
 ncollide3d = { version = "0.19", optional = true }
+nphysics3d = { version = "0.11", optional = true }
 lru = { version = "0.1", optional = true }
 
 [dev-dependencies]
@@ -38,7 +40,7 @@ harness = false
 
 [[example]]
 name = "demo"
-required-features = ["ash"]
+required-features = ["ash", "ncollide", "nphysics"]
 
 [target.'cfg(windows)'.dev-dependencies]
 winapi = { version = "0.3.4", features = ["windef", "winuser"] }
@@ -47,3 +49,7 @@ winapi = { version = "0.3.4", features = ["windef", "winuser"] }
 metal-rs = "0.6"
 cocoa = "0.13"
 objc = "0.2.2"
+
+[patch.crates-io]
+# https://github.com/rustsim/nphysics/pull/191
+nphysics3d = { git = "https://github.com/Ralith/nphysics", rev = "1f15105ff87180c05944044dc5e314edee3d488a" }

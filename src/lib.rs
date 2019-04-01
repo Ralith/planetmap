@@ -14,3 +14,6 @@ pub mod ash;
 
 #[cfg(feature = "ncollide")]
 pub mod ncollide;
+
+#[cfg(feature = "nphysics")]
+pub mod nphysics;
