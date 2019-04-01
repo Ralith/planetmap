@@ -211,7 +211,7 @@ impl PointQuery<f64> for Planet {
                     .unwrap()
             })
             .unwrap();
-        // TODO: Check neighborhood?
+        // TODO: Check neighborhood, so we don't miss as many cliff faces
         (
             PointProjection {
                 point: m * nearest.point,

@@ -15,8 +15,8 @@ use planetmap::ash::ChunkInstance;
 use planet::Planet;
 use window::*;
 
-const VERT: &[u32] = include_glsl!("examples/demo/terrain.vert", debug);
-const FRAG: &[u32] = include_glsl!("examples/demo/terrain.frag", debug);
+const VERT: &[u32] = include_glsl!("examples/demo/terrain.vert");
+const FRAG: &[u32] = include_glsl!("examples/demo/terrain.frag");
 
 /// Number of samples along one edge of a chunk. Must be at least 2.
 const CHUNK_HEIGHT_SIZE: u32 = 17;
@@ -746,7 +746,7 @@ fn main() {
                 * na::Rotation3::from_axis_angle(
                     &na::Vector3::z_axis(),
                     (if roll_left == Pressed { 1.0 } else { 0.0 }
-                     + if roll_right == Pressed { -1.0 } else { 0.0 })
+                        + if roll_right == Pressed { -1.0 } else { 0.0 })
                         * dt,
                 );
 
@@ -1061,7 +1061,7 @@ impl Viewport {
         let sy = self.bottom + self.top;
         na::Projective3::from_matrix_unchecked(
             na::Matrix4::new(
-                2.0 * idx,       0.0, sx * idx, 0.0,
+                2.0 * idx, 0.0, sx * idx, 0.0,
                 0.0, 2.0 * idy, sy * idy, 0.0,
                 0.0,       0.0,      0.0, znear,
                 0.0,       0.0,     -1.0, 0.0))
