@@ -600,4 +600,41 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn end_to_end() {
+        let mut world = CollisionWorld::new(0.01);
+        world.set_narrow_phase(NarrowPhase::new(
+            Box::new(PlanetDispatcher::new(DefaultContactDispatcher::new())),
+            Box::new(DefaultProximityDispatcher::new()),
+        ));
+
+        world.add(
+            na::Isometry3::identity(),
+            ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 5, 4)),
+            CollisionGroups::new(),
+            GeometricQueryType::Contacts(0.0, 0.0),
+            0,
+        );
+        let ball = world
+            .add(
+                na::convert(na::Translation3::new(2.0, 0.0, 0.0)),
+                ShapeHandle::new(Ball::new(1.0)),
+                CollisionGroups::new(),
+                GeometricQueryType::Contacts(0.0, 0.0),
+                0,
+            )
+            .handle();
+
+        world.update();
+        assert!(world.contact_pairs(true).count() > 0);
+
+        world.set_position(ball, na::convert(na::Translation3::new(3.0, 0.0, 0.0)));
+        world.update();
+        assert_eq!(world.contact_pairs(true).count(), 0);
+
+        world.set_position(ball, na::convert(na::Translation3::new(-1.0, 0.0, 0.0)));
+        world.update();
+        assert!(world.contact_pairs(true).count() > 0);
+    }
 }
