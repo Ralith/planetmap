@@ -7,7 +7,7 @@ use std::{fmt, mem};
 #[cfg(feature = "simd")]
 use simdeez::Simd;
 
-use na::Real;
+use na::RealField;
 
 use crate::addressing;
 
@@ -109,14 +109,14 @@ impl Chunk {
     }
 
     /// Length of one of this chunk's edges before mapping onto the sphere
-    pub fn edge_length<N: Real>(&self) -> N {
+    pub fn edge_length<N: RealField>(&self) -> N {
         Coords::edge_length(self.resolution())
     }
 
     /// Location of the center of this chunk on the surface of the sphere
     ///
     /// Transform by face.basis() to get world origin
-    pub fn origin_on_face<N: Real>(&self) -> na::Unit<na::Vector3<N>> {
+    pub fn origin_on_face<N: RealField>(&self) -> na::Unit<na::Vector3<N>> {
         let size = self.edge_length::<N>();
         let vec = na::Vector3::new(
             (na::convert::<_, N>(self.coords.x as f64) + na::convert::<_, N>(0.5)) * size
@@ -161,7 +161,7 @@ impl Chunk {
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this chunk
-    pub fn direction<N: Real>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: RealField>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
         self.coords.direction(self.resolution(), coords)
     }
 
@@ -283,7 +283,7 @@ impl Coords {
     }
 
     /// The approximate direction represented by these coordinates
-    pub fn center<N: Real>(&self, resolution: u32) -> na::Unit<na::Vector3<N>> {
+    pub fn center<N: RealField>(&self, resolution: u32) -> na::Unit<na::Vector3<N>> {
         let texcoord = if resolution == 1 {
             na::Point2::new(0.5, 0.5)
         } else {
@@ -295,7 +295,7 @@ impl Coords {
 
     /// Compute the direction identified by a point in the [0..1]^2 area covered by these
     /// coordinates
-    pub fn direction<N: Real>(&self, resolution: u32, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: RealField>(&self, resolution: u32, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
         let edge_length = Self::edge_length::<N>(resolution);
         let origin_on_face = na::Point2::from(
             na::convert::<_, na::Vector2<N>>(na::Vector2::new(
@@ -308,7 +308,7 @@ impl Coords {
     }
 
     /// Length of the edge in cubemap space of the region covered by these coordinates
-    pub fn edge_length<N: Real>(resolution: u32) -> N {
+    pub fn edge_length<N: RealField>(resolution: u32) -> N {
         na::convert::<_, N>(2.0) / na::convert::<_, N>(resolution as f64)
     }
 
@@ -389,7 +389,7 @@ impl Neg for Face {
 
 impl Face {
     /// Find the face that intersects a vector originating at the center of a cube
-    pub fn from_vector<N: Real + PartialOrd>(x: &na::Vector3<N>) -> Self {
+    pub fn from_vector<N: RealField + PartialOrd>(x: &na::Vector3<N>) -> Self {
         let (&value, &axis) = x
             .iter()
             .zip(&[Face::PX, Face::PY, Face::PZ])
@@ -403,7 +403,7 @@ impl Face {
     }
 
     /// Compute which `Face` a vector intersects, and where the intersection lies
-    pub fn coords<N: Real>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
+    pub fn coords<N: RealField>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
         let face = Self::from_vector(x);
         let wrt_face = face.basis().inverse() * x;
         (
@@ -414,7 +414,7 @@ impl Face {
     }
 
     /// Transform from face space (facing +Z) to sphere space (facing the named axis).
-    pub fn basis<N: Real>(&self) -> na::Rotation3<N> {
+    pub fn basis<N: RealField>(&self) -> na::Rotation3<N> {
         use self::Face::*;
         let (x, y, z) = match *self {
             PX => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
@@ -481,7 +481,7 @@ impl Face {
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this face
-    pub fn direction<N: Real>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: RealField>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
         let dir_z = na::Unit::new_normalize(na::Vector3::new(coords.x, coords.y, N::one()));
         self.basis() * dir_z
     }

@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use hashbrown::hash_map;
 use hashbrown::HashMap;
 use lru::LruCache;
-use na::Real;
+use na::RealField;
 use ncollide3d::{
     bounding_volume::{BoundingSphere, BoundingVolume, HasBoundingVolume, AABB},
     narrow_phase::{ContactAlgorithm, ContactDispatcher, ContactManifoldGenerator},
@@ -45,7 +45,7 @@ use ncollide3d::{
         PointProjection, PointQuery, Ray, RayCast, RayIntersection,
     },
     shape::{FeatureId, Shape, Triangle},
-    utils::{IdAllocator, IsometryOps},
+    utils::IdAllocator,
 };
 
 use crate::chunk::Coords;
@@ -155,13 +155,13 @@ impl Clone for Planet {
     }
 }
 
-impl<N: Real> HasBoundingVolume<N, BoundingSphere<N>> for Planet {
+impl<N: RealField> HasBoundingVolume<N, BoundingSphere<N>> for Planet {
     fn bounding_volume(&self, m: &na::Isometry3<N>) -> BoundingSphere<N> {
         BoundingSphere::new(m * na::Point3::origin(), na::convert(self.max_radius()))
     }
 }
 
-impl<N: Real> HasBoundingVolume<N, AABB<N>> for Planet {
+impl<N: RealField> HasBoundingVolume<N, AABB<N>> for Planet {
     fn bounding_volume(&self, m: &na::Isometry3<N>) -> AABB<N> {
         let radius = na::convert(self.max_radius());
         AABB::from_half_extents(
@@ -528,14 +528,14 @@ impl<T: ContactDispatcher<f64>> ContactDispatcher<f64> for PlanetDispatcher<T> {
     }
 }
 
-struct TriangleContactPreprocessor<'a, N: Real> {
+struct TriangleContactPreprocessor<'a, N: RealField> {
     planet: &'a Planet,
     outer: Option<&'a ContactPreprocessor<N>>,
     coords: Coords,
     triangle: usize,
 }
 
-impl<N: Real> ContactPreprocessor<N> for TriangleContactPreprocessor<'_, N> {
+impl<N: RealField> ContactPreprocessor<N> for TriangleContactPreprocessor<'_, N> {
     fn process_contact(
         &self,
         contact: &mut Contact<N>,
