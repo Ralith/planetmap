@@ -641,7 +641,6 @@ fn main() {
         let mut world = nphysics3d::world::World::<f64>::new();
         world
             .collider_world_mut()
-            .as_collision_world_mut()
             .set_narrow_phase(ncollide3d::narrow_phase::NarrowPhase::new(
                 Box::new(planetmap::ncollide::PlanetDispatcher::new(
                     ncollide3d::narrow_phase::DefaultContactDispatcher::new(),
