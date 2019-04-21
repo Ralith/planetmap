@@ -24,7 +24,7 @@
 //!
 //! world.add(
 //!     na::Isometry3::identity(),
-//!     ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 5, 4)),
+//!     ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 4)),
 //!     CollisionGroups::new(),
 //!     GeometricQueryType::Contacts(0.0, 0.0),
 //!     0,
@@ -54,6 +54,8 @@ use crate::cubemap::Coords;
 pub trait Terrain: Send + Sync + 'static {
     /// Generate a `resolution * resolution` grid of heights wrt. sea level
     fn sample(&self, resolution: u32, coords: &Coords, out: &mut [f32]);
+    /// Number of blocks of samples along the edge of a cubemap face
+    fn face_resolution(&self) -> u32;
     /// The maximum value that will ever be written by `sample`
     fn max_height(&self) -> f32;
     /// The minimum value that will ever be written by `sample`
@@ -65,6 +67,9 @@ pub trait Terrain: Send + Sync + 'static {
 pub struct FlatTerrain;
 
 impl Terrain for FlatTerrain {
+    fn face_resolution(&self) -> u32 {
+        16
+    }
     fn max_height(&self) -> f32 {
         0.0
     }
@@ -85,7 +90,6 @@ impl Terrain for FlatTerrain {
 pub struct Planet {
     terrain: Arc<dyn Terrain>,
     radius: f32,
-    face_resolution: u32,
     chunk_resolution: u32,
     // Future work: could preallocate an arena for height samples
     cache: Mutex<LruCache<Coords, ChunkData>>,
@@ -97,20 +101,17 @@ impl Planet {
     /// `terrain` - source of height samples
     /// `cache_size` - maximum number of chunks of height data to keep in memory
     /// `radius` - distance from origin of points with height 0
-    /// `face_resolution` - number of chunks along the edge of a cubemap face
     /// `chunk_resolution` - number of heightfield samples along the edge of a chunk
     pub fn new(
         terrain: Arc<dyn Terrain>,
         cache_size: usize,
         radius: f32,
-        face_resolution: u32,
         chunk_resolution: u32,
     ) -> Self {
         assert!(chunk_resolution > 1);
         Self {
             terrain,
             radius,
-            face_resolution,
             chunk_resolution,
             cache: Mutex::new(LruCache::new(cache_size)),
         }
@@ -193,7 +194,7 @@ impl PointQuery<f64> for Planet {
         pt: &na::Point3<f64>,
     ) -> (PointProjection<f64>, FeatureId) {
         let local = m.inverse_transform_point(pt);
-        let coords = Coords::from_vector(self.face_resolution, &na::convert(local.coords));
+        let coords = Coords::from_vector(self.terrain.face_resolution(), &na::convert(local.coords));
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, &local);
         let cache = &mut *self.cache.lock().unwrap();
         let data = if let Some(x) = cache.get(&coords) {
@@ -288,7 +289,7 @@ impl<'a> ChunkTriangles<'a> {
         );
         let dir = self
             .coords
-            .direction(self.planet.face_resolution, &unit_coords);
+            .direction(self.planet.terrain.face_resolution(), &unit_coords);
         na::Point3::from(dir.into_inner() * (self.planet.radius as f64 + height as f64))
     }
 
@@ -362,7 +363,7 @@ impl PlanetManifoldGenerator {
         let distance = dir.norm();
         let cache = &mut *planet.cache.lock().unwrap();
         for coords in Coords::neighborhood(
-            planet.face_resolution,
+            planet.terrain.face_resolution(),
             na::convert(dir),
             bounds.radius().atan2(dir.norm()) as f32,
         ) {
@@ -579,7 +580,7 @@ mod tests {
     #[test]
     fn triangles() {
         const CHUNK_RESOLUTION: u32 = 5;
-        let planet = Planet::new(Arc::new(FlatTerrain), 32, 1.0, 4, CHUNK_RESOLUTION);
+        let planet = Planet::new(Arc::new(FlatTerrain), 32, 1.0, CHUNK_RESOLUTION);
         let coords = Coords {
             x: 0,
             y: 0,
@@ -611,7 +612,7 @@ mod tests {
 
         world.add(
             na::Isometry3::identity(),
-            ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 5, 4)),
+            ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 4)),
             CollisionGroups::new(),
             GeometricQueryType::Contacts(0.0, 0.0),
             0,

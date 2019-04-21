@@ -132,6 +132,9 @@ fn pack_normal(normal: &na::Unit<na::Vector3<f32>>) -> [i8; 2] {
 }
 
 impl Terrain for Planet {
+    fn face_resolution(&self) -> u32 {
+        2u32.pow(12)
+    }
     fn max_height(&self) -> f32 {
         10_000.0
     }
@@ -140,7 +143,7 @@ impl Terrain for Planet {
     }
 
     fn sample(&self, resolution: u32, coords: &Coords, out: &mut [f32]) {
-        for (i, sample) in coords.samples(2u32.pow(12), resolution).enumerate() {
+        for (i, sample) in coords.samples(self.face_resolution(), resolution).enumerate() {
             out[i] = self.height_at(&sample);
         }
     }

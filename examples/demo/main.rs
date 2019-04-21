@@ -657,7 +657,6 @@ fn main() {
                 planet.clone(),
                 64 * 1024,
                 planet.radius(),
-                2u32.pow(12),
                 CHUNK_HEIGHT_SIZE,
             ));
             RigidBodyDesc::new()
