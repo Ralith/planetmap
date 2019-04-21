@@ -654,7 +654,7 @@ fn main() {
         ));
         let ball = {
             use ncollide3d::shape::{Ball, ShapeHandle};
-            use nphysics3d::object::{ColliderDesc, RigidBodyDesc};
+            use nphysics3d::object::{ColliderDesc, RigidBodyDesc, BodyStatus};
 
             let planet_shape = ShapeHandle::new(planetmap::ncollide::Planet::new(
                 planet.clone(),
@@ -664,6 +664,7 @@ fn main() {
             ));
             RigidBodyDesc::new()
                 .collider(&ColliderDesc::new(planet_shape))
+                .status(BodyStatus::Static)
                 .name("planet".to_owned())
                 .build(&mut world);
 
