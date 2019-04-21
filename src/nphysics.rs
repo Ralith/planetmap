@@ -42,6 +42,9 @@ impl<N: na::RealField> ForceGenerator<N> for GravityWell<N> {
         for body in bodies.bodies_mut() {
             let part = body.part(0).unwrap(); // TODO: Multibodies
             let r_2 = na::distance_squared(&self.position, &part.center_of_mass());
+            if r_2.abs() < na::convert(1e-3) {
+                continue;
+            }
             let magnitude = self.factor / r_2;
             let direction = (self.position - part.center_of_mass()) / r_2.sqrt();
             body.apply_force(
