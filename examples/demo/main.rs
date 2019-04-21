@@ -648,9 +648,12 @@ fn main() {
                 )),
                 Box::new(ncollide3d::narrow_phase::DefaultProximityDispatcher::new()),
             ));
+        world.add_force_generator(planetmap::nphysics::GravityWell::new(
+            5.972e24,
+            na::Point3::origin(),
+        ));
         let ball = {
             use ncollide3d::shape::{Ball, ShapeHandle};
-            use nphysics3d::math::Velocity;
             use nphysics3d::object::{ColliderDesc, RigidBodyDesc};
 
             let planet_shape = ShapeHandle::new(planetmap::ncollide::Planet::new(
@@ -667,7 +670,6 @@ fn main() {
             RigidBodyDesc::new()
                 .collider(&ColliderDesc::new(ShapeHandle::new(Ball::new(1.0))).density(1.0))
                 .translation(na::Vector3::new(0.0, planet.radius() as f64 + 10.0, 0.0))
-                .velocity(Velocity::linear(0.0, -10.0, 0.0))
                 .name("ball".to_owned())
                 .build(&mut world)
                 .handle()
