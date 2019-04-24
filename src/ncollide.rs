@@ -284,10 +284,8 @@ impl<'a> ChunkTriangles<'a> {
 
     fn vertex(&self, x: u32, y: u32) -> na::Point3<f64> {
         let height = self.samples[(y * self.planet.chunk_resolution + x) as usize];
-        let unit_coords = na::Point2::new(
-            x as f64 / self.planet.chunk_resolution as f64,
-            y as f64 / self.planet.chunk_resolution as f64,
-        );
+        let quad_resolution = (self.planet.chunk_resolution - 1) as f64;
+        let unit_coords = na::Point2::new(x as f64 / quad_resolution, y as f64 / quad_resolution);
         let dir = self
             .coords
             .direction(self.planet.terrain.face_resolution(), &unit_coords);
