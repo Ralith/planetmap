@@ -24,7 +24,7 @@
 //!
 //! world.add(
 //!     na::Isometry3::identity(),
-//!     ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 4)),
+//!     ShapeHandle::new(Planet::new(Arc::new(FlatTerrain::new(16)), 32, 1.0, 4)),
 //!     CollisionGroups::new(),
 //!     GeometricQueryType::Contacts(0.0, 0.0),
 //!     0,
@@ -64,11 +64,19 @@ pub trait Terrain: Send + Sync + 'static {
 
 /// Perfect sphere `Terrain` impl
 #[derive(Debug, Copy, Clone)]
-pub struct FlatTerrain;
+pub struct FlatTerrain {
+    face_resolution: u32,
+}
+
+impl FlatTerrain {
+    pub fn new(face_resolution: u32) -> Self {
+        Self { face_resolution }
+    }
+}
 
 impl Terrain for FlatTerrain {
     fn face_resolution(&self) -> u32 {
-        16
+        self.face_resolution
     }
     fn max_height(&self) -> f32 {
         0.0
@@ -578,25 +586,22 @@ mod tests {
 
     #[test]
     fn triangles() {
-        const CHUNK_RESOLUTION: u32 = 5;
-        let planet = Planet::new(Arc::new(FlatTerrain), 32, 1.0, CHUNK_RESOLUTION);
+        let planet = Planet::new(Arc::new(FlatTerrain::new(1)), 32, 1.0, 2);
         let coords = Coords {
             x: 0,
             y: 0,
             face: Face::PZ,
         };
         let samples = planet.sample(&coords);
-        let iter = ChunkTriangles::new(&planet, coords, &samples[..]);
-        const QUAD_RESOLUTION: u32 = CHUNK_RESOLUTION - 1;
-        assert_eq!(
-            iter.clone().count() as u32,
-            QUAD_RESOLUTION * QUAD_RESOLUTION * 2
-        );
-        for tri in iter.clone() {
-            for point in tri.vertices() {
-                assert!(point.x < 0.0);
-                assert!(point.y < 0.0);
-                assert!(point.z > 0.0);
+        let tris = ChunkTriangles::new(&planet, coords, &samples[..]);
+        assert_eq!(tris.clone().count(), 2);
+        let expected = 1.0 / 3.0f64.sqrt();
+        for tri in tris {
+            for vert in &[tri.a(), tri.b(), tri.c()] {
+                assert!(vert.z > 0.0);
+                for coord in &vert.coords {
+                    assert_eq!(coord.abs(), expected);
+                }
             }
         }
     }
@@ -609,17 +614,25 @@ mod tests {
             Box::new(DefaultProximityDispatcher::new()),
         ));
 
+        const PLANET_RADIUS: f32 = 6371e3;
+        const BALL_RADIUS: f64 = 1.0;
+
         world.add(
             na::Isometry3::identity(),
-            ShapeHandle::new(Planet::new(Arc::new(FlatTerrain), 32, 1.0, 4)),
+            ShapeHandle::new(Planet::new(
+                Arc::new(FlatTerrain::new(2u32.pow(12))),
+                32,
+                PLANET_RADIUS,
+                17,
+            )),
             CollisionGroups::new(),
             GeometricQueryType::Contacts(0.0, 0.0),
             0,
         );
         let ball = world
             .add(
-                na::convert(na::Translation3::new(2.0, 0.0, 0.0)),
-                ShapeHandle::new(Ball::new(1.0)),
+                na::convert(na::Translation3::new(2.0, PLANET_RADIUS as f64, 0.0)),
+                ShapeHandle::new(Ball::new(BALL_RADIUS)),
                 CollisionGroups::new(),
                 GeometricQueryType::Contacts(0.0, 0.0),
                 0,
@@ -629,12 +642,34 @@ mod tests {
         world.update();
         assert!(world.contact_pairs(true).count() > 0);
 
-        world.set_position(ball, na::convert(na::Translation3::new(3.0, 0.0, 0.0)));
+        world.set_position(
+            ball,
+            na::convert(na::Translation3::new(
+                0.0,
+                PLANET_RADIUS as f64 + BALL_RADIUS * 2.0,
+                0.0,
+            )),
+        );
         world.update();
         assert_eq!(world.contact_pairs(true).count(), 0);
 
-        world.set_position(ball, na::convert(na::Translation3::new(-1.0, 0.0, 0.0)));
+        world.set_position(
+            ball,
+            na::convert(na::Translation3::new(-1.0, PLANET_RADIUS as f64, 0.0)),
+        );
         world.update();
         assert!(world.contact_pairs(true).count() > 0);
+
+        for i in 1..10 {
+            use std::f64;
+            let rot = na::UnitQuaternion::from_axis_angle(
+                &na::Vector3::z_axis(),
+                (i as f64 / 1000.0) * f64::consts::PI * 1e-4,
+            );
+            let vec = rot * na::Vector3::new(0.0, PLANET_RADIUS as f64, 0.0);
+            world.set_position(ball, na::convert(na::Translation3::from_vector(vec)));
+            world.update();
+            assert!(world.contact_pairs(true).count() > 0);
+        }
     }
 }
