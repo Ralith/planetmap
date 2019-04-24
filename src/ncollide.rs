@@ -194,7 +194,8 @@ impl PointQuery<f64> for Planet {
         pt: &na::Point3<f64>,
     ) -> (PointProjection<f64>, FeatureId) {
         let local = m.inverse_transform_point(pt);
-        let coords = Coords::from_vector(self.terrain.face_resolution(), &na::convert(local.coords));
+        let coords =
+            Coords::from_vector(self.terrain.face_resolution(), &na::convert(local.coords));
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, &local);
         let cache = &mut *self.cache.lock().unwrap();
         let data = if let Some(x) = cache.get(&coords) {
@@ -293,13 +294,13 @@ impl<'a> ChunkTriangles<'a> {
         na::Point3::from(dir.into_inner() * (self.planet.radius as f64 + height as f64))
     }
 
-    fn get(&self, index: u32) -> Triangle<f64> {
+    fn get(&self) -> Triangle<f64> {
         let quad_resolution = self.planet.chunk_resolution - 1;
 
-        let quad_index = index >> 1;
+        let quad_index = self.index >> 1;
         let y = quad_index / quad_resolution;
         let x = quad_index % quad_resolution;
-        let left = (index & 1) == 0;
+        let left = (self.index & 1) == 0;
         let p0 = self.vertex(x, y);
         let p1 = self.vertex(x + 1, y);
         let p2 = self.vertex(x + 1, y + 1);
@@ -319,7 +320,7 @@ impl Iterator for ChunkTriangles<'_> {
         if self.index == quad_resolution * quad_resolution * 2 {
             return None;
         }
-        let tri = self.get(self.index);
+        let tri = self.get();
         self.index += 1;
         Some(tri)
     }
@@ -365,7 +366,7 @@ impl PlanetManifoldGenerator {
         for coords in Coords::neighborhood(
             planet.terrain.face_resolution(),
             na::convert(dir),
-            bounds.radius().atan2(dir.norm()) as f32,
+            bounds.radius().atan2(distance) as f32,
         ) {
             let data = if let Some(x) = cache.get(&coords) {
                 x
