@@ -633,11 +633,6 @@ fn main() {
 
         let mut swapchain = SwapchainState::new(&base, renderpass, None);
 
-        let mut camera = na::IsometryMatrix3::from_parts(
-            na::Translation3::from(na::Vector3::new(0.0, planet.radius() as f64 + 5e3, 0.0)),
-            na::Rotation3::identity(),
-        );
-
         let mut world = nphysics3d::world::World::<f64>::new();
         world
             .collider_world_mut()
@@ -647,13 +642,9 @@ fn main() {
                 )),
                 Box::new(ncollide3d::narrow_phase::DefaultProximityDispatcher::new()),
             ));
-        world.add_force_generator(planetmap::nphysics::GravityWell::new(
-            5.972e24,
-            na::Point3::origin(),
-        ));
-        let ball = {
+        let camera_body = {
             use ncollide3d::shape::{Ball, ShapeHandle};
-            use nphysics3d::object::{ColliderDesc, RigidBodyDesc, BodyStatus};
+            use nphysics3d::object::{BodyStatus, ColliderDesc, RigidBodyDesc};
 
             let planet_shape = ShapeHandle::new(planetmap::ncollide::Planet::new(
                 planet.clone(),
@@ -668,9 +659,11 @@ fn main() {
                 .build(&mut world);
 
             RigidBodyDesc::new()
-                .collider(&ColliderDesc::new(ShapeHandle::new(Ball::new(1.0))).density(1.0))
-                .translation(na::Vector3::new(0.0, planet.radius() as f64 + 10.0, 0.0))
-                .name("ball".to_owned())
+                .collider(&ColliderDesc::new(ShapeHandle::new(Ball::new(50.0))))
+                .mass(1.0)
+                .translation(na::Vector3::new(0.0, planet.radius() as f64 + 5e3, 0.0))
+                .name("camera".to_owned())
+                .kinematic_rotations(na::Vector3::new(true, true, true))
                 .build(&mut world)
                 .handle()
         };
@@ -692,6 +685,7 @@ fn main() {
         let mut time_accum = 0.0;
         loop {
             let mut keep_going = true;
+            let mut camera_rot = na::UnitQuaternion::identity();
             base.events_loop.poll_events(|e| {
                 use winit::WindowEvent::*;
                 use winit::*;
@@ -757,12 +751,12 @@ fn main() {
                         use winit::DeviceEvent::*;
                         match event {
                             MouseMotion { delta: (x, y) } if panning == Pressed => {
-                                camera = camera
-                                    * na::Rotation3::from_axis_angle(
+                                camera_rot = camera_rot
+                                    * na::UnitQuaternion::from_axis_angle(
                                         &na::Vector3::y_axis(),
                                         -x * 0.003,
                                     )
-                                    * na::Rotation3::from_axis_angle(
+                                    * na::UnitQuaternion::from_axis_angle(
                                         &na::Vector3::x_axis(),
                                         -y * 0.003,
                                     );
@@ -782,13 +776,18 @@ fn main() {
             let dt = dt.as_secs() as f64 + dt.subsec_nanos() as f64 * 1e-9;
             t0 = t1;
 
-            camera = camera
-                * na::Rotation3::from_axis_angle(
+            camera_rot = camera_rot
+                * na::UnitQuaternion::from_axis_angle(
                     &na::Vector3::z_axis(),
                     (if roll_left == Pressed { 1.0 } else { 0.0 }
                         + if roll_right == Pressed { -1.0 } else { 0.0 })
                         * dt,
                 );
+            let camera = world.rigid_body(camera_body).unwrap().position() * camera_rot;
+            world
+                .rigid_body_mut(camera_body)
+                .unwrap()
+                .set_position(camera);
 
             let mut motion = na::Vector3::zeros();
             if left == Pressed {
@@ -810,21 +809,23 @@ fn main() {
                 motion.y -= 1.0;
             }
             let altitude = camera.translation.vector.norm() - planet.radius() as f64;
-            let speed = altitude
+            let speed = altitude.max(100.0)
                 * if sprint == Pressed { 3.0 } else { 1.0 }
                 * if walk == Pressed { 1.0 / 3.0 } else { 1.0 };
-            camera = camera
-                * na::Translation3::from(motion * dt * if speed > 1e8 { 1e8 } else { speed });
+
+            let target_vel = camera.rotation * motion * if speed > 1e8 { 1e8 } else { speed };
+            let actual_vel = world.rigid_body(camera_body).unwrap().velocity().linear;
+            world.rigid_body_mut(camera_body).unwrap().apply_force(
+                0,
+                &nphysics3d::math::Force::new(target_vel - actual_vel, na::zero()),
+                nphysics3d::algebra::ForceType::VelocityChange,
+                true,
+            );
 
             time_accum += dt;
             if time_accum > world.timestep() {
                 world.step();
                 time_accum -= world.timestep();
-
-                let ball = world.rigid_body(ball).unwrap();
-                if ball.activation_status().is_active() {
-                    println!("{}", ball.position().translation.vector);
-                }
             }
 
             let swapchain_suboptimal;
@@ -884,7 +885,7 @@ fn main() {
             uniforms.projection = viewport.projection(1e-2);
             uniforms.view = na::convert(camera.inverse());
             let view = camera.inverse();
-            let (instances, transfers) = cache.update(planet.radius() as f64, &view);
+            let (instances, transfers) = cache.update(planet.radius() as f64, &na::convert(view));
 
             let mut transfer_slots = Vec::new();
             record_submit_commandbuffer(
