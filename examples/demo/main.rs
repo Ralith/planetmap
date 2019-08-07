@@ -9,8 +9,13 @@ use std::{mem, slice};
 use ash::vk;
 use half::f16;
 use memoffset::offset_of;
-use nphysics3d::object::Body;
 use vk_shader_macros::include_glsl;
+
+use nphysics3d::force_generator::DefaultForceGeneratorSet;
+use nphysics3d::joint::DefaultJointConstraintSet;
+use nphysics3d::object::{DefaultBodySet, DefaultColliderSet, RigidBody, Body};
+use nphysics3d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
+use ncollide3d::pipeline::broad_phase::DBVTBroadPhase;
 
 use planetmap::ash::ChunkInstance;
 
@@ -633,39 +638,51 @@ fn main() {
 
         let mut swapchain = SwapchainState::new(&base, renderpass, None);
 
-        let mut world = nphysics3d::world::World::<f64>::new();
-        world
-            .collider_world_mut()
-            .set_narrow_phase(ncollide3d::narrow_phase::NarrowPhase::new(
+        let mut mechanical_world = DefaultMechanicalWorld::new(na::zero());
+        let mut geometrical_world = DefaultGeometricalWorld::from_parts(
+            DBVTBroadPhase::new(na::convert(0.01)),
+            ncollide3d::narrow_phase::NarrowPhase::new(
                 Box::new(planetmap::ncollide::PlanetDispatcher::new(
                     ncollide3d::narrow_phase::DefaultContactDispatcher::new(),
                 )),
                 Box::new(ncollide3d::narrow_phase::DefaultProximityDispatcher::new()),
-            ));
+            ),
+        );
+
+        let mut bodies = DefaultBodySet::new();
+        let mut colliders = DefaultColliderSet::new();
+        let mut joint_constraints = DefaultJointConstraintSet::new();
+        let mut force_generators = DefaultForceGeneratorSet::new();
+
         let camera_body = {
             use ncollide3d::shape::{Ball, ShapeHandle};
-            use nphysics3d::object::{BodyStatus, ColliderDesc, RigidBodyDesc};
+            use nphysics3d::object::{BodyStatus, ColliderDesc, RigidBodyDesc, BodyPartHandle};
 
-            let planet_shape = ShapeHandle::new(planetmap::ncollide::Planet::new(
-                planet.clone(),
-                64 * 1024,
-                planet.radius(),
-                CHUNK_HEIGHT_SIZE,
-            ));
-            RigidBodyDesc::new()
-                .collider(&ColliderDesc::new(planet_shape))
-                .status(BodyStatus::Static)
-                .name("planet".to_owned())
-                .build(&mut world);
+            let planet_body = bodies.insert(RigidBodyDesc::new().status(BodyStatus::Static).build());
 
-            RigidBodyDesc::new()
-                .collider(&ColliderDesc::new(ShapeHandle::new(Ball::new(50.0))))
-                .mass(1.0)
-                .translation(na::Vector3::new(0.0, planet.radius() as f64 + 5e3, 0.0))
-                .name("camera".to_owned())
-                .kinematic_rotations(na::Vector3::new(true, true, true))
-                .build(&mut world)
-                .handle()
+            colliders.insert(
+                ColliderDesc::new(ShapeHandle::new(planetmap::ncollide::Planet::new(
+                    planet.clone(),
+                    64 * 1024,
+                    planet.radius(),
+                    CHUNK_HEIGHT_SIZE,
+                )))
+                .build(BodyPartHandle(planet_body, 0)),
+            );
+
+            let camera = bodies.insert(
+                RigidBodyDesc::new()
+                    //.collider(&ColliderDesc::new())
+                    .mass(1.0)
+                    .translation(na::Vector3::new(0.0, planet.radius() as f64 + 5e3, 0.0))
+                    .kinematic_rotations(na::Vector3::new(true, true, true))
+                    .build(),
+            );
+            colliders.insert(
+                ColliderDesc::new(ShapeHandle::new(Ball::new(50.0)))
+                    .build(BodyPartHandle(camera, 0)),
+            );
+            camera
         };
 
         use winit::ElementState::*;
@@ -783,11 +800,9 @@ fn main() {
                         + if roll_right == Pressed { -1.0 } else { 0.0 })
                         * dt,
                 );
-            let camera = world.rigid_body(camera_body).unwrap().position() * camera_rot;
-            world
-                .rigid_body_mut(camera_body)
-                .unwrap()
-                .set_position(camera);
+            let camera_body = bodies.get_mut(camera_body).unwrap().downcast_mut::<RigidBody<f64>>().unwrap();
+            let camera = camera_body.position() * camera_rot;
+            camera_body.set_position(camera);
 
             let mut motion = na::Vector3::zeros();
             if left == Pressed {
@@ -814,8 +829,8 @@ fn main() {
                 * if walk == Pressed { 1.0 / 3.0 } else { 1.0 };
 
             let target_vel = camera.rotation * motion * if speed > 1e8 { 1e8 } else { speed };
-            let actual_vel = world.rigid_body(camera_body).unwrap().velocity().linear;
-            world.rigid_body_mut(camera_body).unwrap().apply_force(
+            let actual_vel = camera_body.velocity().linear;
+            camera_body.apply_force(
                 0,
                 &nphysics3d::math::Force::new(target_vel - actual_vel, na::zero()),
                 nphysics3d::algebra::ForceType::VelocityChange,
@@ -823,9 +838,15 @@ fn main() {
             );
 
             time_accum += dt;
-            if time_accum > world.timestep() {
-                world.step();
-                time_accum -= world.timestep();
+            if time_accum > mechanical_world.timestep() {
+                mechanical_world.step(
+                    &mut geometrical_world,
+                    &mut bodies,
+                    &mut colliders,
+                    &mut joint_constraints,
+                    &mut force_generators,
+                );
+                time_accum -= mechanical_world.timestep();
             }
 
             let swapchain_suboptimal;

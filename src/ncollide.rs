@@ -45,7 +45,6 @@ use ncollide3d::{
         PointProjection, PointQuery, Ray, RayCast, RayIntersection,
     },
     shape::{FeatureId, Shape, Triangle},
-    utils::IdAllocator,
 };
 
 use crate::cubemap::Coords;
@@ -359,7 +358,6 @@ impl PlanetManifoldGenerator {
         other: &dyn Shape<f64>,
         proc2: Option<&dyn ContactPreprocessor<f64>>,
         prediction: &ContactPrediction<f64>,
-        id_alloc: &mut IdAllocator,
         manifold: &mut ContactManifold<f64>,
     ) {
         self.color ^= true;
@@ -422,7 +420,6 @@ impl PlanetManifoldGenerator {
                         other,
                         proc2,
                         prediction,
-                        id_alloc,
                         manifold,
                     );
                 } else {
@@ -435,7 +432,6 @@ impl PlanetManifoldGenerator {
                         &triangle,
                         Some(&proc1),
                         prediction,
-                        id_alloc,
                         manifold,
                     );
                 }
@@ -457,21 +453,16 @@ impl ContactManifoldGenerator<f64> for PlanetManifoldGenerator {
         b: &dyn Shape<f64>,
         proc2: Option<&dyn ContactPreprocessor<f64>>,
         prediction: &ContactPrediction<f64>,
-        id_alloc: &mut IdAllocator,
         manifold: &mut ContactManifold<f64>,
     ) -> bool {
         if !self.flip {
             if let Some(p) = a.as_shape::<Planet>() {
-                self.run(
-                    d, ma, p, proc1, mb, b, proc2, prediction, id_alloc, manifold,
-                );
+                self.run(d, ma, p, proc1, mb, b, proc2, prediction, manifold);
                 return true;
             }
         } else {
             if let Some(p) = b.as_shape::<Planet>() {
-                self.run(
-                    d, mb, p, proc2, ma, a, proc1, prediction, id_alloc, manifold,
-                );
+                self.run(d, mb, p, proc2, ma, a, proc1, prediction, manifold);
                 return true;
             }
         }
@@ -574,10 +565,14 @@ impl<N: RealField> ContactPreprocessor<N> for TriangleContactPreprocessor<'_, N>
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_relative_eq;
     use ncollide3d::{
         narrow_phase::{DefaultContactDispatcher, DefaultProximityDispatcher, NarrowPhase},
+        pipeline::{
+            object::{CollisionGroups, GeometricQueryType},
+            world::CollisionWorld,
+        },
         shape::{Ball, ShapeHandle},
-        world::{CollisionGroups, CollisionWorld, GeometricQueryType},
     };
 
     use crate::cubemap::Face;
@@ -597,11 +592,13 @@ mod tests {
         assert_eq!(tris.clone().count(), 2);
         let expected = 1.0 / 3.0f64.sqrt();
         for tri in tris {
+            assert!(tri.normal().unwrap().z > 0.0);
             for vert in &[tri.a(), tri.b(), tri.c()] {
                 assert!(vert.z > 0.0);
                 for coord in &vert.coords {
                     assert_eq!(coord.abs(), expected);
                 }
+                assert_relative_eq!(vert.coords.norm(), 1.0);
             }
         }
     }
@@ -629,34 +626,36 @@ mod tests {
             GeometricQueryType::Contacts(0.0, 0.0),
             0,
         );
-        let ball = world
-            .add(
-                na::convert(na::Translation3::new(2.0, PLANET_RADIUS as f64, 0.0)),
-                ShapeHandle::new(Ball::new(BALL_RADIUS)),
-                CollisionGroups::new(),
-                GeometricQueryType::Contacts(0.0, 0.0),
-                0,
-            )
-            .handle();
+        let (ball, _) = world.add(
+            na::convert(na::Translation3::new(2.0, PLANET_RADIUS as f64, 0.0)),
+            ShapeHandle::new(Ball::new(BALL_RADIUS)),
+            CollisionGroups::new(),
+            GeometricQueryType::Contacts(0.0, 0.0),
+            0,
+        );
 
         world.update();
         assert!(world.contact_pairs(true).count() > 0);
 
-        world.set_position(
-            ball,
-            na::convert(na::Translation3::new(
+        world
+            .get_mut(ball)
+            .unwrap()
+            .set_position(na::convert(na::Translation3::new(
                 0.0,
                 PLANET_RADIUS as f64 + BALL_RADIUS * 2.0,
                 0.0,
-            )),
-        );
+            )));
         world.update();
         assert_eq!(world.contact_pairs(true).count(), 0);
 
-        world.set_position(
-            ball,
-            na::convert(na::Translation3::new(-1.0, PLANET_RADIUS as f64, 0.0)),
-        );
+        world
+            .get_mut(ball)
+            .unwrap()
+            .set_position(na::convert(na::Translation3::new(
+                -1.0,
+                PLANET_RADIUS as f64,
+                0.0,
+            )));
         world.update();
         assert!(world.contact_pairs(true).count() > 0);
 
@@ -667,7 +666,7 @@ mod tests {
                 (i as f64 / 1000.0) * f64::consts::PI * 1e-4,
             );
             let vec = rot * na::Vector3::new(0.0, PLANET_RADIUS as f64, 0.0);
-            world.set_position(ball, na::convert(na::Translation3::from_vector(vec)));
+            world.get_mut(ball).unwrap().set_position(na::convert(na::Translation3::from(vec)));
             world.update();
             assert!(world.contact_pairs(true).count() > 0);
         }
