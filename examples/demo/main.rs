@@ -1030,7 +1030,6 @@ fn main() {
                                 fuzzyblue::SOL_IRRADIANCE[2] * 6e-3,
                             ],
                         },
-                        swapchain.extent,
                         0,
                     );
                     device.cmd_end_render_pass(cmd);
