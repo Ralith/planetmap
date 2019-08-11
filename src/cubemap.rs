@@ -12,6 +12,10 @@ use simdeez::Simd;
 ///
 /// Useful for storing and manipulating moderate-resolution samplings of radial functions such as
 /// spherical heightmaps.
+///
+/// For addressing purposes, texels along the edges and at the corners of a face do *not* overlap
+/// with their neighbors. Note that `Coords::samples` nonetheless *does* produce samples that will
+/// overlap along the edges of neighboring `Coords`.
 // TODO: Make this a DST so we can overlay it on Vulkan memory
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CubeMap<T> {
@@ -512,9 +516,13 @@ impl Coords {
             .map(move |face| {
                 let local = face.basis().inverse_transform_vector(&direction);
                 let local = local.xy() / local.z;
+                // atan(x / 1) = angle of `local` around Y axis through cube origin ("midpoint x")
                 let theta_m_x = local.x.atan();
+                // tan(θ_mx - θ) * 1 = coordinate of the intersection of the X lower bound with the cube
                 let x_lower = (theta_m_x - theta).tan();
+                // tan(θ_mx + θ) * 1 = coordinate of the intersection of the X upper bound with the cube
                 let x_upper = (theta_m_x + theta).tan();
+                // once more, perpendicular!
                 let theta_m_y = local.y.atan();
                 let y_lower = (theta_m_y - theta).tan();
                 let y_upper = (theta_m_y + theta).tan();
@@ -569,12 +577,22 @@ impl Coords {
         self.face.direction(&pos_on_face)
     }
 
-    /// Length of the edge in cubemap space of the region covered by these coordinates
+    /// Length of an edge of the bounding square of the cubemap-space area covered by a coordinate
+    /// in a cubemap with a particular `resolution`
     pub fn edge_length<N: RealField>(resolution: u32) -> N {
         na::convert::<_, N>(2.0) / na::convert::<_, N>(resolution as f64)
     }
 
     /// Returns a grid of resolution^2 directions contained by these coords, in scan-line order
+    ///
+    /// - `face_resolution` represents the number of coordinates along an edge of the cubemap
+    /// - `chunk_resolution` represents the number of samples along an edge of this specific coordinate
+    ///
+    /// Edge/corner samples lie *directly* on the edge/corner, and hence are *not* the centers of
+    /// traditionally addressed texels. In other words, the first sample has position (0, 0), not
+    /// (0.5/w, 0.5/h), and the last has position (1, 1), not (1 - 0.5/w, 1 - 0.5/h). This allows
+    /// for seamless interpolation in the neighborhood of chunk edges/corners without needing access
+    /// to data for neighboring chunks.
     pub fn samples(&self, face_resolution: u32, chunk_resolution: u32) -> SampleIter {
         SampleIter {
             coords: *self,
@@ -584,7 +602,7 @@ impl Coords {
         }
     }
 
-    /// Returns a grid of resolution^2 directions contained by these coords, in scan-line order
+    /// SIMD variant of `samples`.
     ///
     /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
     /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
@@ -759,9 +777,15 @@ impl<S: Simd> ExactSizeIterator for SampleIterSimd<S> {
     }
 }
 
+/// Map real coordinates in [0, 1)^2 to integer coordinates in [0, n)^2 such that each integer
+/// covers exactly the same distance
 fn discretize(resolution: usize, texcoords: &na::Point2<f32>) -> (usize, usize) {
-    let texcoords = texcoords * (resolution - 1) as f32 + na::Vector2::new(0.5, 0.5);
-    (texcoords.x as usize, texcoords.y as usize)
+    let texcoords = texcoords * resolution as f32;
+    let max = resolution - 1;
+    (
+        na::clamp(texcoords.x as usize, 0, max),
+        na::clamp(texcoords.y as usize, 0, max),
+    )
 }
 
 #[cfg(test)]
@@ -933,12 +957,12 @@ mod test {
     fn discretize_sanity() {
         assert_eq!(discretize(100, &na::Point2::new(1.0, 1.0)), (99, 99));
         assert_eq!(discretize(100, &na::Point2::new(0.0, 0.0)), (0, 0));
-        assert_eq!(discretize(100, &na::Point2::new(0.996, 0.996)), (99, 99));
-        assert_eq!(discretize(100, &na::Point2::new(0.004, 0.004)), (0, 0));
-        assert_eq!(discretize(100, &na::Point2::new(0.006, 0.006)), (1, 1));
-        assert_eq!(discretize(100, &na::Point2::new(0.994, 0.994)), (98, 98));
+        assert_eq!(discretize(100, &na::Point2::new(0.990, 0.990)), (99, 99));
+        assert_eq!(discretize(100, &na::Point2::new(0.989, 0.989)), (98, 98));
+        assert_eq!(discretize(100, &na::Point2::new(0.010, 0.010)), (1, 1));
+        assert_eq!(discretize(100, &na::Point2::new(0.009, 0.009)), (0, 0));
 
-        assert_eq!(discretize(2, &na::Point2::new(0.4, 0.4)), (0, 0));
-        assert_eq!(discretize(2, &na::Point2::new(0.6, 0.6)), (1, 1));
+        assert_eq!(discretize(2, &na::Point2::new(0.49, 0.49)), (0, 0));
+        assert_eq!(discretize(2, &na::Point2::new(0.50, 0.50)), (1, 1));
     }
 }

@@ -681,4 +681,44 @@ mod tests {
             assert!(world.contact_pairs(true).count() > 0);
         }
     }
+
+    // Ensure absence of a collision hole arising from mistakenly considering chunk centers *not* to
+    // be offset by 0.5 / face_resolution from edges cubemap faces.
+    #[test]
+    fn coordinate_center_regression() {
+        let mut world = CollisionWorld::new(0.01);
+        world.set_narrow_phase(NarrowPhase::new(
+            Box::new(PlanetDispatcher::new(DefaultContactDispatcher::new())),
+            Box::new(DefaultProximityDispatcher::new()),
+        ));
+
+        const PLANET_RADIUS: f32 = 6371e3;
+        const BALL_RADIUS: f64 = 50.0;
+
+        world.add(
+            na::Isometry3::identity(),
+            ShapeHandle::new(Planet::new(
+                Arc::new(FlatTerrain::new(2u32.pow(12))),
+                32,
+                PLANET_RADIUS,
+                17,
+            )),
+            CollisionGroups::new(),
+            GeometricQueryType::Contacts(0.01, 0.01),
+            0,
+        );
+        let coords = na::Vector3::<f64>::new(-5_195_083.148, 3_582_099.812, -877_091.267)
+            .normalize()
+            * PLANET_RADIUS as f64;
+        let (_ball, _) = world.add(
+            na::convert(na::Translation3::from(coords)),
+            ShapeHandle::new(Ball::new(BALL_RADIUS)),
+            CollisionGroups::new(),
+            GeometricQueryType::Contacts(0.01, 0.01),
+            0,
+        );
+
+        world.update();
+        assert!(world.contact_pairs(true).count() > 0);
+    }
 }
