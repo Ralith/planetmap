@@ -346,7 +346,7 @@ impl Face {
     /// Compute which `Face` a vector intersects, and where the intersection lies
     pub fn coords<N: RealField>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
         let face = Self::from_vector(x);
-        let wrt_face = face.basis().inverse() * x;
+        let wrt_face = face.basis().inverse_transform_vector(x);
         (
             face,
             na::Point2::from(wrt_face.xy() * (na::convert::<_, N>(0.5) / wrt_face.z))
@@ -499,6 +499,7 @@ impl Coords {
         direction: na::Vector3<f32>,
         theta: f32,
     ) -> impl Iterator<Item = Self> {
+        /// Map [-1, 1] to [0, 1]
         fn remap(x: f32) -> f32 {
             (na::clamp(x, -1.0, 1.0) + 1.0) / 2.0
         }
@@ -509,7 +510,7 @@ impl Coords {
                     .is_sign_positive()
             })
             .map(move |face| {
-                let local = face.basis().inverse() * &direction;
+                let local = face.basis().inverse_transform_vector(&direction);
                 let local = local.xy() / local.z;
                 let theta_m_x = local.x.atan();
                 let x_lower = (theta_m_x - theta).tan();

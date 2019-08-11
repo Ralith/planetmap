@@ -13,7 +13,10 @@
 //! use ncollide3d::{
 //!     narrow_phase::{DefaultContactDispatcher, DefaultProximityDispatcher, NarrowPhase},
 //!     shape::ShapeHandle,
-//!     world::{CollisionGroups, CollisionWorld, GeometricQueryType},
+//!     pipeline::{
+//!         object::{CollisionGroups, GeometricQueryType},
+//!         world::CollisionWorld,
+//!     },
 //! };
 //!
 //! let mut world = CollisionWorld::new(0.01);
@@ -276,6 +279,8 @@ struct ChunkTriangles<'a> {
     planet: &'a Planet,
     samples: &'a [f32],
     coords: Coords,
+    /// LSB identifies the triangle within a quad, remaining bits identify a quad by position in the
+    /// row-major sequence
     index: u32,
 }
 
@@ -305,11 +310,11 @@ impl<'a> ChunkTriangles<'a> {
         let quad_index = self.index >> 1;
         let y = quad_index / quad_resolution;
         let x = quad_index % quad_resolution;
-        let left = (self.index & 1) == 0;
         let p0 = self.vertex(x, y);
         let p1 = self.vertex(x + 1, y);
         let p2 = self.vertex(x + 1, y + 1);
         let p3 = self.vertex(x, y + 1);
+        let left = (self.index & 1) == 0;
         if left {
             Triangle::new(p0, p1, p2)
         } else {
@@ -321,7 +326,9 @@ impl<'a> ChunkTriangles<'a> {
 impl Iterator for ChunkTriangles<'_> {
     type Item = Triangle<f64>;
     fn next(&mut self) -> Option<Triangle<f64>> {
+        // Number of quads along a chunk edge
         let quad_resolution = self.planet.chunk_resolution - 1;
+        // Two triangles per quad
         if self.index == quad_resolution * quad_resolution * 2 {
             return None;
         }
@@ -666,7 +673,10 @@ mod tests {
                 (i as f64 / 1000.0) * f64::consts::PI * 1e-4,
             );
             let vec = rot * na::Vector3::new(0.0, PLANET_RADIUS as f64, 0.0);
-            world.get_mut(ball).unwrap().set_position(na::convert(na::Translation3::from(vec)));
+            world
+                .get_mut(ball)
+                .unwrap()
+                .set_position(na::convert(na::Translation3::from(vec)));
             world.update();
             assert!(world.contact_pairs(true).count() > 0);
         }
