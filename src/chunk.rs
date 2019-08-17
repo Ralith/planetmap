@@ -50,7 +50,7 @@ impl Chunk {
 
     /// Iterator over the path from this chunk to the root.
     pub fn path(self) -> Path {
-        Path { chunk: self }
+        Path { chunk: Some(self) }
     }
 
     /// The largest chunks contained by this chunk
@@ -170,24 +170,25 @@ impl Chunk {
 }
 
 pub struct Path {
-    chunk: Chunk,
+    chunk: Option<Chunk>,
 }
 
 impl Iterator for Path {
     type Item = Chunk;
     fn next(&mut self) -> Option<Chunk> {
-        let parent = self.chunk.parent()?;
-        Some(mem::replace(&mut self.chunk, parent))
+        let chunk = self.chunk?;
+        self.chunk = chunk.parent();
+        Some(chunk)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.chunk.depth as usize, Some(self.chunk.depth as usize))
+        (self.len(), Some(self.len()))
     }
 }
 
 impl ExactSizeIterator for Path {
     fn len(&self) -> usize {
-        self.chunk.depth as usize
+        self.chunk.map_or(0, |x| x.depth as usize + 1)
     }
 }
 
@@ -385,5 +386,18 @@ mod test {
                 assert_eq!(z[i], reference.z);
             }
         }
+    }
+
+    #[test]
+    fn path() {
+        let leaf = Chunk {
+            coords: Coords {
+                x: 1,
+                y: 1,
+                face: Face::PY,
+            },
+            depth: 1,
+        };
+        assert_eq!(leaf.path().collect::<Vec<_>>(), [leaf, leaf.parent().unwrap()]);
     }
 }
