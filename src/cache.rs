@@ -17,11 +17,19 @@ struct Slot {
 pub struct Config {
     /// Maximum depth of quad-tree traversal
     pub max_depth: u8,
+    /// Upper bound for `Neighborhood` fields
+    ///
+    /// Should be set to the base 2 logarithm of the number of quads along the edge of a chunk to
+    /// reduce stitching artifacts across extreme LoD boundaries.
+    pub max_neighbor_delta: u8,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { max_depth: 12 }
+        Self {
+            max_depth: 12,
+            max_neighbor_delta: u8::max_value(),
+        }
     }
 }
 
@@ -231,7 +239,7 @@ impl Walker {
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
                 // Compute the LoD difference to the rendered neighbor on this edge, if any
                 if let Some(neighbor) = neighbor.path().find(|x| rendering.contains(&x)) {
-                    neighborhood[edge] = chunk.depth - neighbor.depth;
+                    neighborhood[edge] = (chunk.depth - neighbor.depth).min(mgr.config.max_neighbor_delta);
                 }
             }
         }
@@ -339,7 +347,7 @@ mod test {
     fn slots_needed() {
         let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
         for max_depth in 0..12 {
-            let config = Config { max_depth };
+            let config = Config { max_depth, ..Config::default() };
             let needed = config.slots_needed();
             let mut mgr = Manager::new(2048, config);
             let state = mgr.update(&[viewpoint]);

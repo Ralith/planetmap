@@ -81,7 +81,10 @@ fn main() {
             &base.instance,
             base.pdevice,
             base.device.clone(),
-            planetmap::cache::Config { max_depth: 12 },
+            planetmap::cache::Config {
+                max_depth: 12,
+                max_neighbor_delta: CHUNK_QUADS.trailing_zeros() as u8,
+            },
             &[
                 planetmap::ash::TextureKind {
                     format: vk::Format::R16_SFLOAT,
