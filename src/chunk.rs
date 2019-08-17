@@ -48,7 +48,7 @@ impl Chunk {
         })
     }
 
-    /// Iterator over the path from this chunk to the root.
+    /// Iterator over the path from this chunk to the root, inclusive
     pub fn path(self) -> Path {
         Path { chunk: Some(self) }
     }
