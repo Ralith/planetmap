@@ -159,7 +159,7 @@ pub struct State {
 ///
 /// Note that increases in LoD are not represented here; it is always the responsibility of the
 /// higher-detail chunk to account for neighboring lower-detail chunks.
-#[derive(Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 pub struct Neighborhood {
     /// Decrease in LoD in the local -X direction
     pub nx: u8,
@@ -354,4 +354,88 @@ mod test {
             assert_eq!(state.transfer.len(), needed);
         }
     }
+
+    #[test]
+    fn neighborhood() {
+        use crate::cubemap::Coords;
+        let mut mgr = Manager::new(2048, Config::default());
+        let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
+        let state = mgr.update(&[viewpoint]);
+        assert_eq!(state.render.len(), 0);
+        // Get +X to LoD 1, +Y to LoD 0
+        for &chunk in &[
+            Chunk {
+                coords: Coords {
+                    x: 0,
+                    y: 0,
+                    face: Face::PX,
+                },
+                depth: 0,
+            },
+            Chunk {
+                coords: Coords {
+                    x: 0,
+                    y: 0,
+                    face: Face::PY,
+                },
+                depth: 0,
+            },
+            Chunk {
+                coords: Coords {
+                    x: 0,
+                    y: 0,
+                    face: Face::PX,
+                },
+                depth: 1,
+            },
+            Chunk {
+                coords: Coords {
+                    x: 0,
+                    y: 1,
+                    face: Face::PX,
+                },
+                depth: 1,
+            },
+            Chunk {
+                coords: Coords {
+                    x: 1,
+                    y: 0,
+                    face: Face::PX,
+                },
+                depth: 1,
+            },
+            Chunk {
+                coords: Coords {
+                    x: 1,
+                    y: 1,
+                    face: Face::PX,
+                },
+                depth: 1,
+            },
+        ] {
+            assert!(state.transfer.contains(&chunk));
+            let slot = mgr.allocate(chunk).unwrap();
+            mgr.release(slot);
+        }
+
+        // Validate output
+        let state = mgr.update(&[viewpoint]);
+        assert_eq!(state.render.len(), 5);
+        use std::collections::HashMap;
+        let neighbors = state
+            .render
+            .into_iter()
+            .map(|(chunk, neighbors, _slot)| (chunk, neighbors))
+            .collect::<HashMap<_, _>>();
+        let neighborhood = *neighbors.get(&Chunk {
+            coords: Coords {
+                x: 0,
+                y: 0,
+                face: Face::PX,
+            },
+            depth: 1,
+        }).unwrap();
+        assert_ne!(neighborhood, Neighborhood { nx: 0, ny: 0, px: 0, py: 0 });
+    }
+
 }

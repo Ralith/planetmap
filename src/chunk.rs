@@ -1,5 +1,3 @@
-use std::mem;
-
 #[cfg(feature = "simd")]
 use simdeez::Simd;
 

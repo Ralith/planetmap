@@ -18,7 +18,7 @@ nphysics = ["nphysics3d"]
 [dependencies]
 na = { package = "nalgebra", version = "0.18" }
 slab = "0.4.2"
-hashbrown = "0.1"
+hashbrown = "0.6"
 ash = { version = "0.29", optional = true }
 simdeez = { version = "0.6.1", optional = true }
 ncollide3d = { version = "0.20", optional = true }
