@@ -10,19 +10,18 @@ readme = "README.md"
 all-features = true
 
 [features]
-default = ["ash", "simd", "ncollide", "nphysics"]
 simd = ["simdeez"]
 ncollide = ["ncollide3d", "lru"]
 nphysics = ["nphysics3d"]
 
 [dependencies]
-na = { package = "nalgebra", version = "0.18" }
+na = { package = "nalgebra", version = "0.19" }
 slab = "0.4.2"
 hashbrown = "0.6"
 ash = { version = "0.29", optional = true }
 simdeez = { version = "0.6.1", optional = true }
-ncollide3d = { version = "0.20", optional = true }
-nphysics3d = { version = "0.12.0", optional = true }
+ncollide3d = { version = "0.21", optional = true }
+nphysics3d = { version = "0.13.0", optional = true }
 lru = { version = "0.1", optional = true }
 
 [dev-dependencies]

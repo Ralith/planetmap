@@ -1,5 +1,5 @@
 use nphysics3d::force_generator::ForceGenerator;
-use nphysics3d::object::{BodySet, Body};
+use nphysics3d::object::{Body, BodyHandle, BodySet};
 
 /// A force generator simulating the gravity of a point mass at a fixed location
 #[derive(Debug, Clone)]
@@ -39,13 +39,13 @@ impl<N: na::RealField> GravityWell<N> {
     }
 }
 
-impl<N: na::RealField, Bodies: BodySet<N>> ForceGenerator<N, Bodies> for GravityWell<N> {
+impl<N: na::RealField, Handle: BodyHandle> ForceGenerator<N, Handle> for GravityWell<N> {
     fn apply(
         &mut self,
         _params: &nphysics3d::solver::IntegrationParameters<N>,
-        bodies: &mut Bodies,
+        bodies: &mut dyn BodySet<N, Handle = Handle>,
     ) {
-        bodies.foreach_mut(|_, body| {
+        bodies.foreach_mut(&mut |_, body| {
             for part_id in 0.. {
                 let part = match body.part(part_id) {
                     None => break,

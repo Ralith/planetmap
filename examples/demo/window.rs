@@ -275,7 +275,8 @@ impl ExampleBase {
             let entry = Entry::new().unwrap();
             let app_name = CString::new("planetmap example").unwrap();
 
-            let extension_names_raw = extension_names();
+            let mut extension_names_raw = extension_names();
+            extension_names_raw.push(b"VK_KHR_get_physical_device_properties2\0".as_ptr() as _);
 
             let appinfo = vk::ApplicationInfo::builder()
                 .application_name(&app_name)
@@ -332,16 +333,29 @@ impl ExampleBase {
                         .nth(0)
                 })
                 .filter_map(|v| v)
-                .nth(0)
+                .next()
                 .expect("Couldn't find suitable device.");
             let queue_family_index = queue_family_index as u32;
-            let device_extension_names_raw = [Swapchain::name().as_ptr()];
-            let features = vk::PhysicalDeviceFeatures {
-                fill_mode_non_solid: vk::TRUE,
+            let device_extension_names_raw = [
+                Swapchain::name().as_ptr(),
+                b"VK_EXT_descriptor_indexing\0".as_ptr() as _,
+                b"VK_KHR_maintenance3\0".as_ptr() as _,
+            ];
+            let mut indexing = vk::PhysicalDeviceDescriptorIndexingFeaturesEXT {
+                shader_sampled_image_array_non_uniform_indexing: vk::TRUE,
                 ..Default::default()
             };
-            let priorities = [1.0];
+            let mut features = vk::PhysicalDeviceFeatures2 {
+                p_next: &mut indexing as *mut _ as *mut _,
+                features: vk::PhysicalDeviceFeatures {
+                    fill_mode_non_solid: vk::TRUE,
+                    dual_src_blend: vk::TRUE,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
 
+            let priorities = [1.0];
             let queue_info = [vk::DeviceQueueCreateInfo::builder()
                 .queue_family_index(queue_family_index)
                 .queue_priorities(&priorities)
@@ -350,7 +364,7 @@ impl ExampleBase {
             let device_create_info = vk::DeviceCreateInfo::builder()
                 .queue_create_infos(&queue_info)
                 .enabled_extension_names(&device_extension_names_raw)
-                .enabled_features(&features);
+                .push_next(&mut features);
 
             let device = Arc::new(
                 instance
