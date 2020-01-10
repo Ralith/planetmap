@@ -141,7 +141,7 @@ impl<'a, T> IndexMut<&'a na::Vector3<f32>> for CubeMap<T> {
 
 fn index(resolution: usize, x: &na::Vector3<f32>) -> usize {
     let (face, texcoords) = Face::coords(x);
-    let texel = discretize(resolution, &texcoords);
+    let texel = discretize(resolution, texcoords);
     face as usize * resolution * resolution + texel.1 * resolution + texel.0
 }
 
@@ -359,9 +359,9 @@ impl Face {
     }
 
     /// Transform from face space (facing +Z) to sphere space (facing the named axis).
-    pub fn basis<N: RealField>(&self) -> na::Rotation3<N> {
+    pub fn basis<N: RealField>(self) -> na::Rotation3<N> {
         use self::Face::*;
-        let (x, y, z) = match *self {
+        let (x, y, z) = match self {
             PX => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
             NX => (-na::Vector3::z(), -na::Vector3::y(), -na::Vector3::x()),
             PY => (na::Vector3::x(), -na::Vector3::z(), na::Vector3::y()),
@@ -383,9 +383,9 @@ impl Face {
     /// Returns the neighboring face, the edge of that face, and whether the axis shared with that face is parallel or antiparallel.
     ///
     /// Index by `sign << 1 | axis`.
-    pub(crate) fn neighbors(&self) -> &'static [(Face, Edge, bool); 4] {
+    pub(crate) fn neighbors(self) -> &'static [(Face, Edge, bool); 4] {
         use self::Face::*;
-        match *self {
+        match self {
             PX => &[
                 (NZ, Edge::NX, false),
                 (PY, Edge::PX, false),
@@ -426,7 +426,7 @@ impl Face {
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this face
-    pub fn direction<N: RealField>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: RealField>(self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
         let dir_z = na::Unit::new_normalize(na::Vector3::new(coords.x, coords.y, N::one()));
         self.basis() * dir_z
     }
@@ -443,7 +443,7 @@ pub struct Coords {
 impl Coords {
     pub fn from_vector(resolution: u32, vector: &na::Vector3<f32>) -> Self {
         let (face, unit_coords) = Face::coords(vector);
-        let (x, y) = discretize(resolution as usize, &unit_coords);
+        let (x, y) = discretize(resolution as usize, unit_coords);
         Self {
             x: x as u32,
             y: y as u32,
@@ -534,11 +534,11 @@ impl Coords {
             .flat_map(move |(face, lower, upper)| {
                 let (x_lower, y_lower) = discretize(
                     resolution as usize,
-                    &na::Point2::new(remap(lower.0), remap(lower.1)),
+                    na::Point2::new(remap(lower.0), remap(lower.1)),
                 );
                 let (x_upper, y_upper) = discretize(
                     resolution as usize,
-                    &na::Point2::new(remap(upper.0), remap(upper.1)),
+                    na::Point2::new(remap(upper.0), remap(upper.1)),
                 );
                 (y_lower..=y_upper).flat_map(move |y| {
                     (x_lower..=x_upper).map(move |x| Self {
@@ -779,7 +779,7 @@ impl<S: Simd> ExactSizeIterator for SampleIterSimd<S> {
 
 /// Map real coordinates in [0, 1)^2 to integer coordinates in [0, n)^2 such that each integer
 /// covers exactly the same distance
-fn discretize(resolution: usize, texcoords: &na::Point2<f32>) -> (usize, usize) {
+fn discretize(resolution: usize, texcoords: na::Point2<f32>) -> (usize, usize) {
     let texcoords = texcoords * resolution as f32;
     let max = resolution - 1;
     (
