@@ -1,5 +1,5 @@
 use nphysics3d::force_generator::ForceGenerator;
-use nphysics3d::object::{Body, BodyHandle, BodySet};
+use nphysics3d::object::{BodyHandle, BodySet};
 
 /// A force generator simulating the gravity of a point mass at a fixed location
 #[derive(Debug, Clone)]

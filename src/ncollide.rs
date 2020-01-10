@@ -131,7 +131,7 @@ impl Planet {
         self.radius as f64 + self.terrain.max_height() as f64
     }
     fn min_radius(&self) -> f64 {
-        self.radius as f64 + self.terrain.max_height() as f64
+        self.radius as f64 + self.terrain.min_height() as f64
     }
 
     fn sample(&self, coords: &Coords) -> Box<[f32]> {
@@ -143,7 +143,7 @@ impl Planet {
         samples
     }
 
-    fn feature_id(&self, coords: &Coords, triangle: usize, tri_feature: FeatureId) -> FeatureId {
+    fn feature_id(&self, _coords: &Coords, _triangle: usize, _tri_feature: FeatureId) -> FeatureId {
         use FeatureId::*;
         // TODO: Maintain an index into the cache, kept alive by live manifold generators, for improved stability
         Unknown
@@ -258,7 +258,7 @@ impl Shape<f64> for Planet {
     }
 
     #[inline]
-    fn as_point_query(&self) -> Option<&PointQuery<f64>> {
+    fn as_point_query(&self) -> Option<&dyn PointQuery<f64>> {
         Some(self)
     }
 }
@@ -521,8 +521,8 @@ impl<T> PlanetDispatcher<T> {
 impl<T: ContactDispatcher<f64>> ContactDispatcher<f64> for PlanetDispatcher<T> {
     fn get_contact_algorithm(
         &self,
-        a: &Shape<f64>,
-        b: &Shape<f64>,
+        a: &dyn Shape<f64>,
+        b: &dyn Shape<f64>,
     ) -> Option<ContactAlgorithm<f64>> {
         if a.is_shape::<Planet>() {
             return Some(Box::new(PlanetManifoldGenerator::new(false)));
@@ -536,7 +536,7 @@ impl<T: ContactDispatcher<f64>> ContactDispatcher<f64> for PlanetDispatcher<T> {
 
 struct TriangleContactPreprocessor<'a, N: RealField> {
     planet: &'a Planet,
-    outer: Option<&'a ContactPreprocessor<N>>,
+    outer: Option<&'a dyn ContactPreprocessor<N>>,
     coords: Coords,
     triangle: usize,
 }
