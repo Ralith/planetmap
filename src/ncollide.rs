@@ -268,6 +268,7 @@ impl RayCast<f64> for Planet {
         &self,
         _m: &na::Isometry3<f64>,
         _ray: &Ray<f64>,
+        _max_toi: f64,
         _solid: bool,
     ) -> Option<RayIntersection<f64>> {
         unimplemented!()
