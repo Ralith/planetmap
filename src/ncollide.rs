@@ -9,7 +9,7 @@
 //!
 //! ```
 //! use std::sync::Arc;
-//! use planetmap::ncollide::{PlanetDispatcher, Planet, FlatTerrain};
+//! use planetmap::ncollide::{PlanetDispatcher, PlanetProximityDispatcher, Planet, FlatTerrain};
 //! use ncollide3d::{
 //!     narrow_phase::{DefaultContactDispatcher, DefaultProximityDispatcher, NarrowPhase},
 //!     shape::ShapeHandle,
@@ -22,7 +22,7 @@
 //! let mut world = CollisionWorld::new(0.01);
 //! world.set_narrow_phase(NarrowPhase::new(
 //!     Box::new(PlanetDispatcher::new(DefaultContactDispatcher::new())),
-//!     Box::new(DefaultProximityDispatcher::new()),
+//!     Box::new(PlanetProximityDispatcher::new(DefaultProximityDispatcher::new())),
 //! ));
 //!
 //! world.add(
@@ -51,6 +51,8 @@ use ncollide3d::{
 };
 
 use crate::cubemap::Coords;
+use ncollide3d::narrow_phase::{ProximityAlgorithm, ProximityDetector, ProximityDispatcher};
+use ncollide3d::query::Proximity;
 
 /// Height data source for `Planet`
 pub trait Terrain: Send + Sync + 'static {
@@ -342,7 +344,7 @@ impl Iterator for ChunkTriangles<'_> {
 /// Narrow-phase collision detection algorithm for `Planet`
 pub struct PlanetManifoldGenerator {
     flip: bool,
-    state: HashMap<(Coords, usize), TriangleData>,
+    state: HashMap<(Coords, usize), TriangleContactData>,
     color: bool,
 }
 
@@ -356,13 +358,13 @@ impl PlanetManifoldGenerator {
         }
     }
 
-    fn run(
+    fn contact(
         &mut self,
         dispatcher: &dyn ContactDispatcher<f64>,
-        ma: &na::Isometry3<f64>,
+        planet_transform: &na::Isometry3<f64>,
         planet: &Planet,
         proc1: Option<&dyn ContactPreprocessor<f64>>,
-        mb: &na::Isometry3<f64>,
+        other_transform: &na::Isometry3<f64>,
         other: &dyn Shape<f64>,
         proc2: Option<&dyn ContactPreprocessor<f64>>,
         prediction: &ContactPrediction<f64>,
@@ -371,8 +373,12 @@ impl PlanetManifoldGenerator {
         self.color ^= true;
         let color = self.color;
 
-        let bounds = other.bounding_sphere(mb).loosened(prediction.linear());
-        let dir = ma.inverse_transform_point(bounds.center()).coords;
+        let bounds = other
+            .bounding_sphere(other_transform)
+            .loosened(prediction.linear());
+        let dir = planet_transform
+            .inverse_transform_point(bounds.center())
+            .coords;
         let distance = dir.norm();
         let cache = &mut *planet.cache.lock().unwrap();
         for coords in Coords::neighborhood(
@@ -393,7 +399,7 @@ impl PlanetManifoldGenerator {
             // Future work: should be able to filter triangles before actually computing them
             for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples)
                 .enumerate()
-                .filter(|(_, tri)| tri.bounding_sphere(ma).intersects(&bounds))
+                .filter(|(_, tri)| tri.bounding_sphere(planet_transform).intersects(&bounds))
             {
                 let tri = match self.state.entry((coords, i)) {
                     hash_map::Entry::Occupied(mut e) => {
@@ -406,8 +412,9 @@ impl PlanetManifoldGenerator {
                         } else {
                             dispatcher.get_contact_algorithm(other, &triangle)
                         } {
-                            e.insert(TriangleData { algo, color })
+                            e.insert(TriangleContactData { algo, color })
                         } else {
+                            // no contact algorithm found
                             return;
                         }
                     }
@@ -421,10 +428,10 @@ impl PlanetManifoldGenerator {
                 if !self.flip {
                     tri.algo.generate_contacts(
                         dispatcher,
-                        ma,
+                        planet_transform,
                         &triangle,
                         Some(&proc1),
-                        mb,
+                        other_transform,
                         other,
                         proc2,
                         prediction,
@@ -433,10 +440,10 @@ impl PlanetManifoldGenerator {
                 } else {
                     tri.algo.generate_contacts(
                         dispatcher,
-                        mb,
+                        other_transform,
                         other,
                         proc2,
-                        ma,
+                        planet_transform,
                         &triangle,
                         Some(&proc1),
                         prediction,
@@ -453,7 +460,7 @@ impl PlanetManifoldGenerator {
 impl ContactManifoldGenerator<f64> for PlanetManifoldGenerator {
     fn generate_contacts(
         &mut self,
-        d: &dyn ContactDispatcher<f64>,
+        dispatcher: &dyn ContactDispatcher<f64>,
         ma: &na::Isometry3<f64>,
         a: &dyn Shape<f64>,
         proc1: Option<&dyn ContactPreprocessor<f64>>,
@@ -465,16 +472,159 @@ impl ContactManifoldGenerator<f64> for PlanetManifoldGenerator {
     ) -> bool {
         if !self.flip {
             if let Some(p) = a.as_shape::<Planet>() {
-                self.run(d, ma, p, proc1, mb, b, proc2, prediction, manifold);
+                self.contact(dispatcher, ma, p, proc1, mb, b, proc2, prediction, manifold);
                 return true;
             }
         } else {
             if let Some(p) = b.as_shape::<Planet>() {
-                self.run(d, mb, p, proc2, ma, a, proc1, prediction, manifold);
+                self.contact(dispatcher, mb, p, proc2, ma, a, proc1, prediction, manifold);
                 return true;
             }
         }
         false
+    }
+}
+
+/// Narrow-phase collision detection algorithm for `Planet`
+pub struct PlanetProximityGenerator {
+    flip: bool,
+    state: HashMap<(Coords, usize), TriangleProximityData>,
+    color: bool,
+}
+
+impl PlanetProximityGenerator {
+    /// `flip` - whether the planet is the second shape
+    pub fn new(flip: bool) -> Self {
+        Self {
+            flip,
+            state: HashMap::new(),
+            color: false,
+        }
+    }
+
+    fn proximity(
+        &mut self,
+        dispatcher: &dyn ProximityDispatcher<f64>,
+        planet_transform: &na::Isometry3<f64>,
+        planet: &Planet,
+        other_transform: &na::Isometry3<f64>,
+        other: &dyn Shape<f64>,
+        margin: f64,
+    ) -> Option<Proximity> {
+        self.color ^= true;
+        let color = self.color;
+
+        let bounds = other.bounding_sphere(other_transform);
+        let dir = planet_transform
+            .inverse_transform_point(bounds.center())
+            .coords;
+        let distance = dir.norm();
+        let cache = &mut *planet.cache.lock().unwrap();
+
+        // used to store Proximity::Disjoint or Proximity::WithinMargin cases (logical OR of the for
+        // loop)
+        let mut result = Proximity::Disjoint;
+
+        for coords in Coords::neighborhood(
+            planet.terrain.face_resolution(),
+            na::convert(dir),
+            bounds.radius().atan2(distance) as f32,
+        ) {
+            let data = if let Some(x) = cache.get(&coords) {
+                x
+            } else {
+                cache.put(coords, ChunkData::new(planet.sample(&coords)));
+                cache.get(&coords).unwrap()
+            };
+            if planet.radius as f64 + data.max as f64 + bounds.radius() < distance {
+                // Short-circuit if `other` is way above this chunk
+                continue;
+            }
+            // Future work: should be able to filter triangles before actually computing them
+            for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples)
+                .enumerate()
+                .filter(|(_, tri)| tri.bounding_sphere(planet_transform).intersects(&bounds))
+            {
+                let tri = match self.state.entry((coords, i)) {
+                    hash_map::Entry::Occupied(mut e) => {
+                        e.get_mut().color = color;
+                        e.into_mut()
+                    }
+                    hash_map::Entry::Vacant(e) => {
+                        if let Some(algo) = if !self.flip {
+                            dispatcher.get_proximity_algorithm(&triangle, other)
+                        } else {
+                            dispatcher.get_proximity_algorithm(other, &triangle)
+                        } {
+                            e.insert(TriangleProximityData { algo, color })
+                        } else {
+                            // no proximity algorithm found
+                            return None;
+                        }
+                    }
+                };
+
+                let res = if !self.flip {
+                    tri.algo.update(
+                        dispatcher,
+                        planet_transform,
+                        &triangle,
+                        other_transform,
+                        other,
+                        margin,
+                    )
+                } else {
+                    tri.algo.update(
+                        dispatcher,
+                        planet_transform,
+                        &triangle,
+                        other_transform,
+                        other,
+                        margin,
+                    )
+                };
+
+                match res {
+                    Some(Proximity::WithinMargin) => {
+                        result = Proximity::WithinMargin;
+                    }
+                    Some(Proximity::Intersecting) => {
+                        return Some(Proximity::Intersecting);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        self.state.retain(|_, x| x.color == color);
+
+        Some(result)
+    }
+}
+
+impl ProximityDetector<f64> for PlanetProximityGenerator {
+    fn update(
+        &mut self,
+        dispatcher: &dyn ProximityDispatcher<f64>,
+        ma: &na::Isometry3<f64>,
+        a: &dyn Shape<f64>,
+        mb: &na::Isometry3<f64>,
+        b: &dyn Shape<f64>,
+        margin: f64,
+    ) -> Option<Proximity> {
+        if !self.flip {
+            if let Some(p) = a.as_shape::<Planet>() {
+                self.proximity(dispatcher, ma, p, mb, b, margin)
+            } else {
+                None
+            }
+        } else {
+            if let Some(p) = b.as_shape::<Planet>() {
+                self.proximity(dispatcher, mb, p, ma, a, margin)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -502,9 +652,42 @@ impl ChunkData {
     }
 }
 
-struct TriangleData {
+struct TriangleContactData {
     algo: ContactAlgorithm<f64>,
     color: bool,
+}
+
+struct TriangleProximityData {
+    algo: ProximityAlgorithm<f64>,
+    color: bool,
+}
+
+/// A `ProximityDispatcher` that knows about `Planet`
+pub struct PlanetProximityDispatcher<T> {
+    inner: T,
+}
+
+impl<T> PlanetProximityDispatcher<T> {
+    /// Construct a dispatcher that forwards unrecognized shape pairs to `inner`
+    pub fn new(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T: ProximityDispatcher<f64>> ProximityDispatcher<f64> for PlanetProximityDispatcher<T> {
+    fn get_proximity_algorithm(
+        &self,
+        a: &dyn Shape<f64>,
+        b: &dyn Shape<f64>,
+    ) -> Option<ProximityAlgorithm<f64>> {
+        if a.is_shape::<Planet>() {
+            return Some(Box::new(PlanetProximityGenerator::new(false)));
+        }
+        if b.is_shape::<Planet>() {
+            return Some(Box::new(PlanetProximityGenerator::new(true)));
+        }
+        self.inner.get_proximity_algorithm(a, b)
+    }
 }
 
 /// A `ContactDispatcher` that knows about `Planet`
