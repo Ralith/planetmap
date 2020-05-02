@@ -379,77 +379,62 @@ impl PlanetManifoldGenerator {
         let dir = planet_transform
             .inverse_transform_point(bounds.center())
             .coords;
-        let distance = dir.norm();
-        let cache = &mut *planet.cache.lock().unwrap();
-        for coords in Coords::neighborhood(
-            planet.terrain.face_resolution(),
-            na::convert(dir),
-            bounds.radius().atan2(distance) as f32,
+
+        for (coords, triangle, triangle_index) in chunk_broadphase_triangle_iter(
+            &mut *planet.cache.lock().unwrap(),
+            planet,
+            *planet_transform,
+            dir,
+            bounds,
         ) {
-            let data = if let Some(x) = cache.get(&coords) {
-                x
-            } else {
-                cache.put(coords, ChunkData::new(planet.sample(&coords)));
-                cache.get(&coords).unwrap()
-            };
-            if planet.radius as f64 + data.max as f64 + bounds.radius() < distance {
-                // Short-circuit if `other` is way above this chunk
-                continue;
-            }
-            // Future work: should be able to filter triangles before actually computing them
-            for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples)
-                .enumerate()
-                .filter(|(_, tri)| tri.bounding_sphere(planet_transform).intersects(&bounds))
-            {
-                let tri = match self.state.entry((coords, i)) {
-                    hash_map::Entry::Occupied(mut e) => {
-                        e.get_mut().color = color;
-                        e.into_mut()
-                    }
-                    hash_map::Entry::Vacant(e) => {
-                        if let Some(algo) = if !self.flip {
-                            dispatcher.get_contact_algorithm(&triangle, other)
-                        } else {
-                            dispatcher.get_contact_algorithm(other, &triangle)
-                        } {
-                            e.insert(TriangleContactData { algo, color })
-                        } else {
-                            // no contact algorithm found
-                            return;
-                        }
-                    }
-                };
-                let proc1 = TriangleContactPreprocessor {
-                    planet,
-                    outer: proc1,
-                    coords,
-                    triangle: i,
-                };
-                if !self.flip {
-                    tri.algo.generate_contacts(
-                        dispatcher,
-                        planet_transform,
-                        &triangle,
-                        Some(&proc1),
-                        other_transform,
-                        other,
-                        proc2,
-                        prediction,
-                        manifold,
-                    );
-                } else {
-                    tri.algo.generate_contacts(
-                        dispatcher,
-                        other_transform,
-                        other,
-                        proc2,
-                        planet_transform,
-                        &triangle,
-                        Some(&proc1),
-                        prediction,
-                        manifold,
-                    );
+            let tri = match self.state.entry((coords, triangle_index)) {
+                hash_map::Entry::Occupied(mut e) => {
+                    e.get_mut().color = color;
+                    e.into_mut()
                 }
+                hash_map::Entry::Vacant(e) => {
+                    if let Some(algo) = if !self.flip {
+                        dispatcher.get_contact_algorithm(&triangle, other)
+                    } else {
+                        dispatcher.get_contact_algorithm(other, &triangle)
+                    } {
+                        e.insert(TriangleContactData { algo, color })
+                    } else {
+                        // no contact algorithm found
+                        return;
+                    }
+                }
+            };
+            let proc1 = TriangleContactPreprocessor {
+                planet,
+                outer: proc1,
+                coords,
+                triangle: triangle_index,
+            };
+            if !self.flip {
+                tri.algo.generate_contacts(
+                    dispatcher,
+                    planet_transform,
+                    &triangle,
+                    Some(&proc1),
+                    other_transform,
+                    other,
+                    proc2,
+                    prediction,
+                    manifold,
+                );
+            } else {
+                tri.algo.generate_contacts(
+                    dispatcher,
+                    other_transform,
+                    other,
+                    proc2,
+                    planet_transform,
+                    &triangle,
+                    Some(&proc1),
+                    prediction,
+                    manifold,
+                );
             }
         }
 
@@ -518,81 +503,66 @@ impl PlanetProximityGenerator {
         let dir = planet_transform
             .inverse_transform_point(bounds.center())
             .coords;
-        let distance = dir.norm();
-        let cache = &mut *planet.cache.lock().unwrap();
 
         // used to store Proximity::Disjoint or Proximity::WithinMargin cases (logical OR of the for
         // loop)
         let mut result = Proximity::Disjoint;
 
-        for coords in Coords::neighborhood(
-            planet.terrain.face_resolution(),
-            na::convert(dir),
-            bounds.radius().atan2(distance) as f32,
+        for (coords, triangle, triangle_index) in chunk_broadphase_triangle_iter(
+            &mut *planet.cache.lock().unwrap(),
+            planet,
+            *planet_transform,
+            dir,
+            bounds,
         ) {
-            let data = if let Some(x) = cache.get(&coords) {
-                x
-            } else {
-                cache.put(coords, ChunkData::new(planet.sample(&coords)));
-                cache.get(&coords).unwrap()
-            };
-            if planet.radius as f64 + data.max as f64 + bounds.radius() < distance {
-                // Short-circuit if `other` is way above this chunk
-                continue;
-            }
-            // Future work: should be able to filter triangles before actually computing them
-            for (i, triangle) in ChunkTriangles::new(planet, coords, &data.samples)
-                .enumerate()
-                .filter(|(_, tri)| tri.bounding_sphere(planet_transform).intersects(&bounds))
-            {
-                let tri = match self.state.entry((coords, i)) {
-                    hash_map::Entry::Occupied(mut e) => {
-                        e.get_mut().color = color;
-                        e.into_mut()
-                    }
-                    hash_map::Entry::Vacant(e) => {
-                        if let Some(algo) = if !self.flip {
-                            dispatcher.get_proximity_algorithm(&triangle, other)
-                        } else {
-                            dispatcher.get_proximity_algorithm(other, &triangle)
-                        } {
-                            e.insert(TriangleProximityData { algo, color })
-                        } else {
-                            // no proximity algorithm found
-                            return None;
-                        }
-                    }
-                };
-
-                let res = if !self.flip {
-                    tri.algo.update(
-                        dispatcher,
-                        planet_transform,
-                        &triangle,
-                        other_transform,
-                        other,
-                        margin,
-                    )
-                } else {
-                    tri.algo.update(
-                        dispatcher,
-                        planet_transform,
-                        &triangle,
-                        other_transform,
-                        other,
-                        margin,
-                    )
-                };
-
-                match res {
-                    Some(Proximity::WithinMargin) => {
-                        result = Proximity::WithinMargin;
-                    }
-                    Some(Proximity::Intersecting) => {
-                        return Some(Proximity::Intersecting);
-                    }
-                    _ => {}
+            let tri = match self.state.entry((coords, triangle_index)) {
+                hash_map::Entry::Occupied(mut e) => {
+                    e.get_mut().color = color;
+                    e.into_mut()
                 }
+                hash_map::Entry::Vacant(e) => {
+                    if let Some(algo) = if !self.flip {
+                        dispatcher.get_proximity_algorithm(&triangle, other)
+                    } else {
+                        dispatcher.get_proximity_algorithm(other, &triangle)
+                    } {
+                        e.insert(TriangleProximityData { algo, color })
+                    } else {
+                        // no proximity algorithm found
+                        return None;
+                    }
+                }
+            };
+
+            let res = if !self.flip {
+                tri.algo.update(
+                    dispatcher,
+                    planet_transform,
+                    &triangle,
+                    other_transform,
+                    other,
+                    margin,
+                )
+            } else {
+                tri.algo.update(
+                    dispatcher,
+                    other_transform,
+                    other,
+                    planet_transform,
+                    &triangle,
+                    margin,
+                )
+            };
+
+            match res {
+                Some(Proximity::WithinMargin) => {
+                    result = Proximity::WithinMargin;
+                }
+                Some(Proximity::Intersecting) => {
+                    result = Proximity::Intersecting;
+                    break;
+                }
+                _ => {}
             }
         }
 
@@ -626,6 +596,54 @@ impl ProximityDetector<f64> for PlanetProximityGenerator {
             }
         }
     }
+}
+
+fn chunk_broadphase_triangle_iter<'a>(
+    planet_cache: &'a mut LruCache<Coords, ChunkData>,
+    planet: &'a Planet,
+    planet_transform: na::Isometry3<f64>,
+    dir: na::Vector3<f64>,
+    other_collider_bounds: BoundingSphere<f64>,
+) -> impl Iterator<Item = (Coords, Triangle<f64>, usize)> + 'a {
+    let distance = dir.norm();
+
+    Coords::neighborhood(
+        planet.terrain.face_resolution(),
+        na::convert(dir),
+        other_collider_bounds.radius().atan2(distance) as f32,
+    )
+    .filter_map(|coords| {
+        let data = if let Some(x) = planet_cache.get(&coords) {
+            x
+        } else {
+            planet_cache.put(coords, ChunkData::new(planet.sample(&coords)));
+            planet_cache.get(&coords).unwrap()
+        };
+
+        // Skip if `other` is way above or below this chunk
+        if planet.radius as f64 + data.max as f64 + other_collider_bounds.radius() >= distance
+            || planet.radius as f64 + data.min as f64 - other_collider_bounds.radius() < distance
+        {
+            None
+        } else {
+            // Future work: should be able to filter triangles before actually computing them
+            Some(
+                ChunkTriangles::new(planet, coords, &data.samples)
+                    .enumerate()
+                    .filter_map(|(triangle_idx, triangle)| {
+                        if triangle
+                            .bounding_sphere(&planet_transform)
+                            .intersects(&other_collider_bounds)
+                        {
+                            Some((coords, triangle, triangle_idx))
+                        } else {
+                            None
+                        }
+                    }),
+            )
+        }
+    })
+    .flatten()
 }
 
 #[derive(Debug, Clone)]
