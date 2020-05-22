@@ -380,13 +380,16 @@ impl PlanetManifoldGenerator {
             .inverse_transform_point(bounds.center())
             .coords;
 
-        for (coords, triangle, triangle_index) in chunk_broadphase_triangle_iter(
-            &mut *planet.cache.lock().unwrap(),
+        let mut cache_guard = planet.cache.lock().unwrap();
+        let triangle_iter = ChunkTriangleBroadphaseIter::new(
+            &mut *cache_guard,
             planet,
             *planet_transform,
             dir,
             bounds,
-        ) {
+        );
+
+        for (coords, triangle, triangle_index) in triangle_iter {
             let tri = match self.state.entry((coords, triangle_index)) {
                 hash_map::Entry::Occupied(mut e) => {
                     e.get_mut().color = color;
@@ -508,13 +511,16 @@ impl PlanetProximityGenerator {
         // loop)
         let mut result = Proximity::Disjoint;
 
-        for (coords, triangle, triangle_index) in chunk_broadphase_triangle_iter(
-            &mut *planet.cache.lock().unwrap(),
+        let mut cache_guard = planet.cache.lock().unwrap();
+        let triangle_iter = ChunkTriangleBroadphaseIter::new(
+            &mut *cache_guard,
             planet,
             *planet_transform,
             dir,
             bounds,
-        ) {
+        );
+
+        for (coords, triangle, triangle_index) in triangle_iter {
             let tri = match self.state.entry((coords, triangle_index)) {
                 hash_map::Entry::Occupied(mut e) => {
                     e.get_mut().color = color;
@@ -598,52 +604,124 @@ impl ProximityDetector<f64> for PlanetProximityGenerator {
     }
 }
 
-fn chunk_broadphase_triangle_iter<'a>(
+/// Used to iterate over every triangle in proximity to the given collider.
+struct ChunkTriangleBroadphaseIter<'a> {
+    neighborhood: Box<dyn Iterator<Item = Coords>>,
+    current_chunk: Option<(Coords, std::iter::Enumerate<ChunkTriangles<'a>>)>,
+
     planet_cache: &'a mut LruCache<Coords, ChunkData>,
     planet: &'a Planet,
     planet_transform: na::Isometry3<f64>,
-    dir: na::Vector3<f64>,
     other_collider_bounds: BoundingSphere<f64>,
-) -> impl Iterator<Item = (Coords, Triangle<f64>, usize)> + 'a {
-    let distance = dir.norm();
+    distance: f64,
+}
 
-    Coords::neighborhood(
-        planet.terrain.face_resolution(),
-        na::convert(dir),
-        other_collider_bounds.radius().atan2(distance) as f32,
-    )
-    .filter_map(|coords| {
-        let data = if let Some(x) = planet_cache.get(&coords) {
-            x
-        } else {
-            planet_cache.put(coords, ChunkData::new(planet.sample(&coords)));
-            planet_cache.get(&coords).unwrap()
-        };
+impl<'a> ChunkTriangleBroadphaseIter<'a> {
+    fn new(
+        planet_cache: &'a mut LruCache<Coords, ChunkData>,
+        planet: &'a Planet,
+        planet_transform: na::Isometry3<f64>,
+        dir: na::Vector3<f64>,
+        other_collider_bounds: BoundingSphere<f64>,
+    ) -> ChunkTriangleBroadphaseIter<'a> {
+        let distance = dir.norm();
 
-        // Skip if `other` is way above or below this chunk
-        if planet.radius as f64 + data.max as f64 + other_collider_bounds.radius() >= distance
-            || planet.radius as f64 + data.min as f64 - other_collider_bounds.radius() < distance
-        {
-            None
-        } else {
-            // Future work: should be able to filter triangles before actually computing them
-            Some(
-                ChunkTriangles::new(planet, coords, &data.samples)
-                    .enumerate()
-                    .filter_map(|(triangle_idx, triangle)| {
-                        if triangle
-                            .bounding_sphere(&planet_transform)
-                            .intersects(&other_collider_bounds)
-                        {
-                            Some((coords, triangle, triangle_idx))
-                        } else {
-                            None
-                        }
-                    }),
-            )
+        ChunkTriangleBroadphaseIter {
+            neighborhood: Box::new(Coords::neighborhood(
+                planet.terrain.face_resolution(),
+                na::convert(dir),
+                other_collider_bounds.radius().atan2(distance) as f32,
+            )),
+            current_chunk: None,
+
+            planet_cache,
+            planet,
+            planet_transform,
+            distance: dir.norm(),
+            other_collider_bounds,
         }
-    })
-    .flatten()
+    }
+}
+
+impl<'a> Iterator for ChunkTriangleBroadphaseIter<'a> {
+    type Item = (Coords, Triangle<f64>, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let mut temp_chunk = None;
+            let (coords, (triangle_idx, triangle)) = if self.current_chunk.is_some() && {
+                let (coords, triangle_iter) = self.current_chunk.as_mut().unwrap();
+
+                temp_chunk = triangle_iter.next().map(|b| (*coords, b));
+                temp_chunk.is_some()
+            } {
+                // Current chunk has triangles left to yield
+
+                temp_chunk.unwrap()
+            } else {
+                // Current chunk has no more triangles left to yield (or has just been initialized to None)
+
+                loop {
+                    let coords = self.neighborhood.next()?;
+
+                    // Also drops the reference to the chunk's sample buffer reference (see below in proof of safety).
+                    self.current_chunk = None;
+
+                    let chunk_data = if let Some(_) = self.planet_cache.get(&coords) {
+                        self.planet_cache.peek(&coords).unwrap()
+                    } else {
+                        self.planet_cache
+                            .put(coords, ChunkData::new(self.planet.sample(&coords)));
+
+                        self.planet_cache.peek(&coords).unwrap()
+                    };
+
+                    // Skip this chunk if `other` is way above or below it
+                    if self.planet.radius as f64
+                        + chunk_data.max as f64
+                        + self.other_collider_bounds.radius()
+                        >= self.distance
+                        || self.planet.radius as f64 + chunk_data.min as f64
+                            - self.other_collider_bounds.radius()
+                            < self.distance
+                    {
+                        continue;
+                    } else {
+                        // SAFETY: `self.current_chunk` is set to `None` before we mutate the LruCache again.
+                        //         The mutably borrowed LruCache is only ever modified in this loop's block.
+                        let elided_lifetime_borrow =
+                            unsafe { &*(&*chunk_data.samples as *const _) };
+
+                        self.current_chunk = Some((
+                            coords,
+                            ChunkTriangles::new(self.planet, coords, elided_lifetime_borrow)
+                                .enumerate(),
+                        ));
+
+                        let (_, triangle_iter) = self.current_chunk.as_mut().unwrap();
+
+                        // Panic safety: We assume that the newly made ChunkTriangles yields at least one triangle
+                        break (
+                            coords,
+                            triangle_iter
+                                .next()
+                                .expect("ChunkTriangles failed to yield at least one triangle"),
+                        );
+                    }
+                }
+            };
+
+            // Skip this triangle if its bounding sphere does not collide with `other`'s bounding sphere
+            if triangle
+                .bounding_sphere(&self.planet_transform)
+                .intersects(&self.other_collider_bounds)
+            {
+                break Some((coords, triangle, triangle_idx));
+            } else {
+                continue;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
