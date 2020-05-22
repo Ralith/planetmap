@@ -36,8 +36,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use hashbrown::hash_map;
-use hashbrown::HashMap;
+use hashbrown::{hash_map, HashMap};
 use lru::LruCache;
 use na::RealField;
 use ncollide3d::{
@@ -51,8 +50,10 @@ use ncollide3d::{
 };
 
 use crate::cubemap::Coords;
-use ncollide3d::narrow_phase::{ProximityAlgorithm, ProximityDetector, ProximityDispatcher};
-use ncollide3d::query::Proximity;
+use ncollide3d::{
+    narrow_phase::{ProximityAlgorithm, ProximityDetector, ProximityDispatcher},
+    query::Proximity,
+};
 
 /// Height data source for `Planet`
 pub trait Terrain: Send + Sync + 'static {
@@ -680,10 +681,10 @@ impl<'a> Iterator for ChunkTriangleBroadphaseIter<'a> {
                     if self.planet.radius as f64
                         + chunk_data.max as f64
                         + self.other_collider_bounds.radius()
-                        >= self.distance
+                        < self.distance
                         || self.planet.radius as f64 + chunk_data.min as f64
                             - self.other_collider_bounds.radius()
-                            < self.distance
+                            > self.distance
                     {
                         continue;
                     } else {
