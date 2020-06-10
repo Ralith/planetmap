@@ -955,14 +955,14 @@ mod test {
 
     #[test]
     fn discretize_sanity() {
-        assert_eq!(discretize(100, &na::Point2::new(1.0, 1.0)), (99, 99));
-        assert_eq!(discretize(100, &na::Point2::new(0.0, 0.0)), (0, 0));
-        assert_eq!(discretize(100, &na::Point2::new(0.990, 0.990)), (99, 99));
-        assert_eq!(discretize(100, &na::Point2::new(0.989, 0.989)), (98, 98));
-        assert_eq!(discretize(100, &na::Point2::new(0.010, 0.010)), (1, 1));
-        assert_eq!(discretize(100, &na::Point2::new(0.009, 0.009)), (0, 0));
+        assert_eq!(discretize(100, na::Point2::new(1.0, 1.0)), (99, 99));
+        assert_eq!(discretize(100, na::Point2::new(0.0, 0.0)), (0, 0));
+        assert_eq!(discretize(100, na::Point2::new(0.990, 0.990)), (99, 99));
+        assert_eq!(discretize(100, na::Point2::new(0.989, 0.989)), (98, 98));
+        assert_eq!(discretize(100, na::Point2::new(0.010, 0.010)), (1, 1));
+        assert_eq!(discretize(100, na::Point2::new(0.009, 0.009)), (0, 0));
 
-        assert_eq!(discretize(2, &na::Point2::new(0.49, 0.49)), (0, 0));
-        assert_eq!(discretize(2, &na::Point2::new(0.50, 0.50)), (1, 1));
+        assert_eq!(discretize(2, na::Point2::new(0.49, 0.49)), (0, 0));
+        assert_eq!(discretize(2, na::Point2::new(0.50, 0.50)), (1, 1));
     }
 }

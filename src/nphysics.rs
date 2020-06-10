@@ -46,11 +46,8 @@ impl<N: na::RealField, Handle: BodyHandle> ForceGenerator<N, Handle> for Gravity
         bodies: &mut dyn BodySet<N, Handle = Handle>,
     ) {
         bodies.foreach_mut(&mut |_, body| {
-            for part_id in 0.. {
-                let part = match body.part(part_id) {
-                    None => break,
-                    Some(x) => x,
-                };
+            for part_id in 0..body.num_parts() {
+                let part = body.part(part_id).unwrap();
                 let r_2 = na::distance_squared(&self.position, &part.center_of_mass());
                 if r_2.abs() < na::convert(1e-3) {
                     continue;
