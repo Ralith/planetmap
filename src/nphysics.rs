@@ -46,7 +46,7 @@ impl<N: na::RealField, Handle: BodyHandle> ForceGenerator<N, Handle> for Gravity
         bodies: &mut dyn BodySet<N, Handle = Handle>,
     ) {
         bodies.foreach_mut(&mut |_, body| {
-            for part_id in 0.. {
+            for part_id in 0..body.num_parts(){
                 let part = match body.part(part_id) {
                     None => break,
                     Some(x) => x,
