@@ -1,29 +1,12 @@
 //! Based on ash's examples/lib.rs
 
-#[cfg(target_os = "macos")]
-use cocoa::appkit::{NSView, NSWindow};
-#[cfg(target_os = "macos")]
-use cocoa::base::id as cocoa_id;
-#[cfg(target_os = "macos")]
-use metal_rs::CoreAnimationLayer;
-#[cfg(target_os = "macos")]
-use objc::runtime::YES;
-#[cfg(target_os = "macos")]
-use std::mem;
-
-#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
-use ash::extensions::khr::XlibSurface;
 use ash::extensions::{
     ext::DebugReport,
     khr::{Surface, Swapchain},
 };
 
-#[cfg(target_os = "windows")]
-use ash::extensions::khr::Win32Surface;
-#[cfg(target_os = "macos")]
-use ash::extensions::mvk::MacOSSurface;
 pub use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
-use ash::{vk, vk_make_version, Device, Entry, Instance};
+use ash::{vk, Device, Entry, Instance};
 use std::default::Default;
 use std::ffi::{CStr, CString};
 use std::ops::Drop;
@@ -81,108 +64,6 @@ pub fn record_submit_commandbuffer<T, D: DeviceV1_0, F: FnOnce() -> T>(
     }
 }
 
-#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
-unsafe fn create_surface<E: EntryV1_0, I: InstanceV1_0>(
-    entry: &E,
-    instance: &I,
-    window: &winit::Window,
-) -> Result<vk::SurfaceKHR, vk::Result> {
-    use winit::os::unix::WindowExt;
-    let x11_display = window.get_xlib_display().unwrap();
-    let x11_window = window.get_xlib_window().unwrap();
-    let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
-        .window(x11_window)
-        .dpy(x11_display as *mut vk::Display);
-
-    let xlib_surface_loader = XlibSurface::new(entry, instance);
-    xlib_surface_loader.create_xlib_surface(&x11_create_info, None)
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn create_surface<E: EntryV1_0, I: InstanceV1_0>(
-    entry: &E,
-    instance: &I,
-    window: &winit::Window,
-) -> Result<vk::SurfaceKHR, vk::Result> {
-    use std::ptr;
-    use winit::os::macos::WindowExt;
-
-    let wnd: cocoa_id = mem::transmute(window.get_nswindow());
-
-    let layer = CoreAnimationLayer::new();
-
-    layer.set_edge_antialiasing_mask(0);
-    layer.set_presents_with_transaction(false);
-    layer.remove_all_animations();
-
-    let view = wnd.contentView();
-
-    layer.set_contents_scale(view.backingScaleFactor());
-    view.setLayer(mem::transmute(layer.as_ref()));
-    view.setWantsLayer(YES);
-
-    let create_info = vk::MacOSSurfaceCreateInfoMVK {
-        s_type: vk::StructureType::MACOS_SURFACE_CREATE_INFO_M,
-        p_next: ptr::null(),
-        flags: Default::default(),
-        p_view: window.get_nsview() as *const c_void,
-    };
-
-    let macos_surface_loader = MacOSSurface::new(entry, instance);
-    macos_surface_loader.create_mac_os_surface_mvk(&create_info, None)
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn create_surface<E: EntryV1_0, I: InstanceV1_0>(
-    entry: &E,
-    instance: &I,
-    window: &winit::Window,
-) -> Result<vk::SurfaceKHR, vk::Result> {
-    use std::ptr;
-    use winapi::shared::windef::HWND;
-    use winapi::um::libloaderapi::GetModuleHandleW;
-    use winit::os::windows::WindowExt;
-
-    let hwnd = window.get_hwnd() as HWND;
-    let hinstance = GetModuleHandleW(ptr::null()) as *const c_void;
-    let win32_create_info = vk::Win32SurfaceCreateInfoKHR {
-        s_type: vk::StructureType::WIN32_SURFACE_CREATE_INFO_KHR,
-        p_next: ptr::null(),
-        flags: Default::default(),
-        hinstance: hinstance,
-        hwnd: hwnd as *const c_void,
-    };
-    let win32_surface_loader = Win32Surface::new(entry, instance);
-    win32_surface_loader.create_win32_surface(&win32_create_info, None)
-}
-
-#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
-fn extension_names() -> Vec<*const i8> {
-    vec![
-        Surface::name().as_ptr(),
-        XlibSurface::name().as_ptr(),
-        DebugReport::name().as_ptr(),
-    ]
-}
-
-#[cfg(target_os = "macos")]
-fn extension_names() -> Vec<*const i8> {
-    vec![
-        Surface::name().as_ptr(),
-        MacOSSurface::name().as_ptr(),
-        DebugReport::name().as_ptr(),
-    ]
-}
-
-#[cfg(all(windows))]
-fn extension_names() -> Vec<*const i8> {
-    vec![
-        Surface::name().as_ptr(),
-        Win32Surface::name().as_ptr(),
-        DebugReport::name().as_ptr(),
-    ]
-}
-
 unsafe extern "system" fn vulkan_debug_callback(
     flags: vk::DebugReportFlagsEXT,
     _: vk::DebugReportObjectTypeEXT,
@@ -193,7 +74,11 @@ unsafe extern "system" fn vulkan_debug_callback(
     p_message: *const c_char,
     _: *mut c_void,
 ) -> u32 {
-    eprintln!("{:?} {}", flags, CStr::from_ptr(p_message).to_string_lossy());
+    eprintln!(
+        "{:?} {}",
+        flags,
+        CStr::from_ptr(p_message).to_string_lossy()
+    );
     vk::FALSE
 }
 
@@ -241,8 +126,7 @@ pub struct ExampleBase {
     pub surface_loader: Surface,
     pub swapchain_loader: Arc<Swapchain>,
     pub debug_report_loader: DebugReport,
-    pub window: winit::Window,
-    pub events_loop: winit::EventsLoop,
+    pub window: winit::window::Window,
     pub debug_call_back: vk::DebugReportCallbackEXT,
 
     pub pdevice: vk::PhysicalDevice,
@@ -261,29 +145,39 @@ pub struct ExampleBase {
 }
 
 impl ExampleBase {
-    pub fn new(window_width: u32, window_height: u32) -> Self {
+    pub fn new(window_width: u32, window_height: u32) -> (Self, winit::event_loop::EventLoop<()>) {
         unsafe {
-            let events_loop = winit::EventsLoop::new();
-            let window = winit::WindowBuilder::new()
+            let event_loop = winit::event_loop::EventLoop::new();
+            let window = winit::window::WindowBuilder::new()
                 .with_title("planetmap example")
-                .with_dimensions(winit::dpi::LogicalSize::new(
+                .with_inner_size(winit::dpi::LogicalSize::new(
                     window_width as f64,
                     window_height as f64,
                 ))
-                .build(&events_loop)
+                .build(&event_loop)
                 .unwrap();
             let entry = Entry::new().unwrap();
             let app_name = CString::new("planetmap example").unwrap();
 
-            let mut extension_names_raw = extension_names();
-            extension_names_raw.push(b"VK_KHR_get_physical_device_properties2\0".as_ptr() as _);
+            let mut extension_names_raw = vec![
+                Surface::name().as_ptr(),
+                DebugReport::name().as_ptr(),
+                b"VK_KHR_get_physical_device_properties2\0".as_ptr() as _,
+            ];
+
+            extension_names_raw.extend(
+                ash_window::enumerate_required_extensions(&window)
+                    .unwrap()
+                    .into_iter()
+                    .map(|x| x.as_ptr()),
+            );
 
             let appinfo = vk::ApplicationInfo::builder()
                 .application_name(&app_name)
                 .application_version(0)
                 .engine_name(&app_name)
                 .engine_version(0)
-                .api_version(vk_make_version!(1, 0, 36));
+                .api_version(vk::make_version(1, 0, 36));
 
             let create_info = vk::InstanceCreateInfo::builder()
                 .application_info(&appinfo)
@@ -305,7 +199,7 @@ impl ExampleBase {
             let debug_call_back = debug_report_loader
                 .create_debug_report_callback(&debug_info, None)
                 .unwrap();
-            let surface = create_surface(&entry, &instance, &window).unwrap();
+            let surface = ash_window::create_surface(&entry, &instance, &window, None).unwrap();
             let pdevices = instance
                 .enumerate_physical_devices()
                 .expect("Physical device error");
@@ -320,11 +214,13 @@ impl ExampleBase {
                         .filter_map(|(index, ref info)| {
                             let supports_graphic_and_surface =
                                 info.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                                    && surface_loader.get_physical_device_surface_support(
-                                        *pdevice,
-                                        index as u32,
-                                        surface,
-                                    );
+                                    && surface_loader
+                                        .get_physical_device_surface_support(
+                                            *pdevice,
+                                            index as u32,
+                                            surface,
+                                        )
+                                        .unwrap();
                             match supports_graphic_and_surface {
                                 true => Some((*pdevice, index)),
                                 _ => None,
@@ -416,27 +312,29 @@ impl ExampleBase {
             let rendering_complete_semaphore = device
                 .create_semaphore(&semaphore_create_info, None)
                 .unwrap();
-            ExampleBase {
-                events_loop,
-                entry,
-                instance,
-                device,
-                queue_family_index,
-                pdevice,
-                device_memory_properties,
-                window,
-                surface_loader,
-                swapchain_loader,
-                present_queue,
-                pool,
-                draw_command_buffer,
-                present_complete_semaphore,
-                rendering_complete_semaphore,
-                surface,
-                surface_format,
-                debug_call_back,
-                debug_report_loader,
-            }
+            (
+                ExampleBase {
+                    entry,
+                    instance,
+                    device,
+                    queue_family_index,
+                    pdevice,
+                    device_memory_properties,
+                    window,
+                    surface_loader,
+                    swapchain_loader,
+                    present_queue,
+                    pool,
+                    draw_command_buffer,
+                    present_complete_semaphore,
+                    rendering_complete_semaphore,
+                    surface,
+                    surface_format,
+                    debug_call_back,
+                    debug_report_loader,
+                },
+                event_loop,
+            )
         }
     }
 }

@@ -11,11 +11,12 @@ use half::f16;
 use memoffset::offset_of;
 use vk_shader_macros::include_glsl;
 
+use ncollide3d::pipeline::broad_phase::DBVTBroadPhase;
 use nphysics3d::force_generator::DefaultForceGeneratorSet;
 use nphysics3d::joint::DefaultJointConstraintSet;
-use nphysics3d::object::{DefaultBodySet, DefaultColliderSet, RigidBody, Body};
+use nphysics3d::object::{Body, DefaultBodySet, DefaultColliderSet, RigidBody};
 use nphysics3d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
-use ncollide3d::pipeline::broad_phase::DBVTBroadPhase;
+use winit::platform::desktop::EventLoopExtDesktop;
 
 use planetmap::ash::ChunkInstance;
 
@@ -36,7 +37,7 @@ const STAGING_BUFFER_LENGTH: u32 = 256;
 
 fn main() {
     unsafe {
-        let mut base = ExampleBase::new(512, 512);
+        let (base, mut event_loop) = ExampleBase::new(512, 512);
         let planet = Arc::new(Planet::new());
 
         let atmosphere_builder = fuzzyblue::Builder::new(
@@ -688,7 +689,7 @@ fn main() {
             camera
         };
 
-        use winit::ElementState::*;
+        use winit::event::ElementState::*;
         let mut panning = Released;
         let mut left = Released;
         let mut right = Released;
@@ -703,94 +704,92 @@ fn main() {
 
         let mut t0 = Instant::now();
         let mut time_accum = 0.0;
-        loop {
-            let mut keep_going = true;
-            let mut camera_rot = na::UnitQuaternion::identity();
-            base.events_loop.poll_events(|e| {
-                use winit::WindowEvent::*;
-                use winit::*;
-                match e {
-                    Event::WindowEvent { event, .. } => match event {
-                        CloseRequested => {
-                            keep_going = false;
-                        }
-                        MouseInput {
-                            button: MouseButton::Left,
-                            state,
-                            ..
-                        } => {
-                            panning = state;
-                        }
-                        WindowEvent::KeyboardInput {
-                            input:
-                                winit::KeyboardInput {
-                                    state,
-                                    virtual_keycode: Some(key),
-                                    ..
-                                },
-                            ..
-                        } => {
-                            use VirtualKeyCode::*;
-                            match key {
-                                A => {
-                                    left = state;
-                                }
-                                D => {
-                                    right = state;
-                                }
-                                W => {
-                                    forward = state;
-                                }
-                                S => {
-                                    back = state;
-                                }
-                                R => {
-                                    up = state;
-                                }
-                                F => {
-                                    down = state;
-                                }
-                                Q => {
-                                    roll_left = state;
-                                }
-                                E => {
-                                    roll_right = state;
-                                }
-                                LShift => {
-                                    sprint = state;
-                                }
-                                LControl => {
-                                    walk = state;
-                                }
-                                _ => {}
+        let mut camera_rot = na::UnitQuaternion::identity();
+        event_loop.run_return(|e, _, control_flow| {
+            use winit::event::{Event, MouseButton, WindowEvent::*};
+            use winit::event_loop::ControlFlow;
+            *control_flow = ControlFlow::Poll;
+            let render = matches!(e, Event::MainEventsCleared);
+            match e {
+                Event::WindowEvent { event, .. } => match event {
+                    CloseRequested => {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    MouseInput {
+                        button: MouseButton::Left,
+                        state,
+                        ..
+                    } => {
+                        panning = state;
+                    }
+                    KeyboardInput {
+                        input:
+                            winit::event::KeyboardInput {
+                                state,
+                                virtual_keycode: Some(key),
+                                ..
+                            },
+                        ..
+                    } => {
+                        use winit::event::VirtualKeyCode::*;
+                        match key {
+                            A => {
+                                left = state;
                             }
-                        }
-                        _ => {}
-                    },
-                    Event::DeviceEvent { event, .. } => {
-                        use winit::DeviceEvent::*;
-                        match event {
-                            MouseMotion { delta: (x, y) } if panning == Pressed => {
-                                camera_rot = camera_rot
-                                    * na::UnitQuaternion::from_axis_angle(
-                                        &na::Vector3::y_axis(),
-                                        -x * 0.003,
-                                    )
-                                    * na::UnitQuaternion::from_axis_angle(
-                                        &na::Vector3::x_axis(),
-                                        -y * 0.003,
-                                    );
+                            D => {
+                                right = state;
+                            }
+                            W => {
+                                forward = state;
+                            }
+                            S => {
+                                back = state;
+                            }
+                            R => {
+                                up = state;
+                            }
+                            F => {
+                                down = state;
+                            }
+                            Q => {
+                                roll_left = state;
+                            }
+                            E => {
+                                roll_right = state;
+                            }
+                            LShift => {
+                                sprint = state;
+                            }
+                            LControl => {
+                                walk = state;
                             }
                             _ => {}
                         }
                     }
                     _ => {}
+                },
+                Event::DeviceEvent { event, .. } => {
+                    use winit::event::DeviceEvent::*;
+                    match event {
+                        MouseMotion { delta: (x, y) } if panning == Pressed => {
+                            camera_rot = camera_rot
+                                * na::UnitQuaternion::from_axis_angle(
+                                    &na::Vector3::y_axis(),
+                                    -x * 0.003,
+                                )
+                                * na::UnitQuaternion::from_axis_angle(
+                                    &na::Vector3::x_axis(),
+                                    -y * 0.003,
+                                );
+                        }
+                        _ => {}
+                    }
                 }
-            });
-            if !keep_going {
-                break;
+                _ => {}
             }
-
+            if !render {
+                return;
+            }
             let t1 = Instant::now();
             let dt = t1 - t0;
             let dt = dt.as_secs() as f64 + dt.subsec_nanos() as f64 * 1e-9;
@@ -803,8 +802,13 @@ fn main() {
                         + if roll_right == Pressed { -1.0 } else { 0.0 })
                         * dt,
                 );
-            let camera_body = bodies.get_mut(camera_body).unwrap().downcast_mut::<RigidBody<f64>>().unwrap();
+            let camera_body = bodies
+                .get_mut(camera_body)
+                .unwrap()
+                .downcast_mut::<RigidBody<f64>>()
+                .unwrap();
             let camera = camera_body.position() * camera_rot;
+            camera_rot = na::UnitQuaternion::identity();
             camera_body.set_position(camera);
 
             let mut motion = na::Vector3::zeros();
@@ -860,14 +864,13 @@ fn main() {
                         break idx;
                     }
                     Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                        swapchain = SwapchainState::new(&base, renderpass, Some(swapchain));
+                        swapchain = SwapchainState::new(&base, renderpass, None);
                     }
                     Err(e) => {
                         panic!("{}", e);
                     }
                 }
             };
-            atmosphere.set_depth_buffer(0, swapchain.depth_image_view);
             let clear_values = [
                 vk::ClearValue {
                     color: vk::ClearColorValue {
@@ -1058,9 +1061,9 @@ fn main() {
             if out_of_date {
                 // Wait for present to finish
                 base.device.queue_wait_idle(base.present_queue).unwrap();
-                swapchain = SwapchainState::new(&base, renderpass, Some(swapchain));
+                swapchain = SwapchainState::new(&base, renderpass, None);
             }
-        }
+        });
 
         base.device.device_wait_idle().unwrap();
         base.device.destroy_pipeline(graphics_pipeline, None);
