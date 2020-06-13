@@ -1,7 +1,6 @@
 use hashbrown::{HashMap, HashSet};
 use std::ops::{Index, IndexMut};
 
-use na;
 use slab::Slab;
 
 use crate::cubemap::{Edge, Face};
@@ -239,7 +238,8 @@ impl Walker {
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
                 // Compute the LoD difference to the rendered neighbor on this edge, if any
                 if let Some(neighbor) = neighbor.path().find(|x| rendering.contains(&x)) {
-                    neighborhood[edge] = (chunk.depth - neighbor.depth).min(mgr.config.max_neighbor_delta);
+                    neighborhood[edge] =
+                        (chunk.depth - neighbor.depth).min(mgr.config.max_neighbor_delta);
                 }
             }
         }
@@ -347,7 +347,10 @@ mod test {
     fn slots_needed() {
         let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
         for max_depth in 0..12 {
-            let config = Config { max_depth, ..Config::default() };
+            let config = Config {
+                max_depth,
+                ..Config::default()
+            };
             let needed = config.slots_needed();
             let mut mgr = Manager::new(2048, config);
             let state = mgr.update(&[viewpoint]);
@@ -427,15 +430,24 @@ mod test {
             .into_iter()
             .map(|(chunk, neighbors, _slot)| (chunk, neighbors))
             .collect::<HashMap<_, _>>();
-        let neighborhood = *neighbors.get(&Chunk {
-            coords: Coords {
-                x: 0,
-                y: 0,
-                face: Face::PX,
-            },
-            depth: 1,
-        }).unwrap();
-        assert_ne!(neighborhood, Neighborhood { nx: 0, ny: 0, px: 0, py: 0 });
+        let neighborhood = *neighbors
+            .get(&Chunk {
+                coords: Coords {
+                    x: 0,
+                    y: 0,
+                    face: Face::PX,
+                },
+                depth: 1,
+            })
+            .unwrap();
+        assert_ne!(
+            neighborhood,
+            Neighborhood {
+                nx: 0,
+                ny: 0,
+                px: 0,
+                py: 0
+            }
+        );
     }
-
 }
