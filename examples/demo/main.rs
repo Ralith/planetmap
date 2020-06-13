@@ -114,6 +114,49 @@ fn main() {
             ],
             base.queue_family_index,
         );
+
+        // Silence validation layer false positives
+        record_submit_commandbuffer(
+            &*base.device,
+            base.draw_command_buffer,
+            base.present_queue,
+            &[],
+            &[],
+            &[],
+            || {
+                let cmd = base.draw_command_buffer;
+                let barriers = cache
+                    .arrays()
+                    .flat_map(|x| x)
+                    .map(|image| vk::ImageMemoryBarrier {
+                        image,
+                        dst_access_mask: vk::AccessFlags::SHADER_READ,
+                        old_layout: vk::ImageLayout::UNDEFINED,
+                        new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        subresource_range: vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: vk::REMAINING_ARRAY_LAYERS,
+                        },
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>();
+                base.device.cmd_pipeline_barrier(
+                    cmd,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
+                    Default::default(),
+                    &[],
+                    &[],
+                    &barriers,
+                );
+            },
+        );
+
         let engine = cache.transfer_engine(base.queue_family_index);
 
         let renderpass_attachments = [

@@ -264,6 +264,14 @@ impl Cache {
             .map(|x| x.arrays.iter().map(|x| x.view))
     }
 
+    /// For each element in `textures`, yields an iterator of `vk::Image`s of texture arrays
+    pub fn arrays<'a>(&'a self) -> impl Iterator<Item = impl Iterator<Item = vk::Image> + 'a> {
+        self.shared
+            .arrays
+            .iter()
+            .map(|x| x.arrays.iter().map(|x| x.image))
+    }
+
     /// The number of slots per `vk::ImageView` in `array_views`
     ///
     /// Use this constant to compute the exact `vk::ImageView` and layer corresponding to a given
