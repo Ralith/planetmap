@@ -660,9 +660,10 @@ fn main() {
 
         let camera_body = {
             use ncollide3d::shape::{Ball, ShapeHandle};
-            use nphysics3d::object::{BodyStatus, ColliderDesc, RigidBodyDesc, BodyPartHandle};
+            use nphysics3d::object::{BodyPartHandle, BodyStatus, ColliderDesc, RigidBodyDesc};
 
-            let planet_body = bodies.insert(RigidBodyDesc::new().status(BodyStatus::Static).build());
+            let planet_body =
+                bodies.insert(RigidBodyDesc::new().status(BodyStatus::Static).build());
 
             colliders.insert(
                 ColliderDesc::new(ShapeHandle::new(planetmap::ncollide::Planet::new(

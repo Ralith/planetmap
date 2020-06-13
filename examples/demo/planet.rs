@@ -144,7 +144,10 @@ impl Terrain for Planet {
     }
 
     fn sample(&self, resolution: u32, coords: &Coords, out: &mut [f32]) {
-        for (i, sample) in coords.samples(self.face_resolution(), resolution).enumerate() {
+        for (i, sample) in coords
+            .samples(self.face_resolution(), resolution)
+            .enumerate()
+        {
             out[i] = self.height_at(&sample);
         }
     }

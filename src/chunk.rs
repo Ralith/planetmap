@@ -193,6 +193,7 @@ impl ExactSizeIterator for Path {
 #[cfg(test)]
 mod test {
     use super::*;
+    use approx::*;
 
     #[test]
     fn neighbors() {
@@ -322,9 +323,9 @@ mod test {
                 assert_eq!(
                     chunk
                         .samples(2)
-                        .filter(|&x| x.x.abs() == corner
-                            && x.y.abs() == corner
-                            && x.z.abs() == corner)
+                        .filter(|&x| abs_diff_eq!(x.x.abs(), corner)
+                            && abs_diff_eq!(x.y.abs(), corner)
+                            && abs_diff_eq!(x.z.abs(), corner))
                         .count(),
                     1
                 );
@@ -396,6 +397,9 @@ mod test {
             },
             depth: 1,
         };
-        assert_eq!(leaf.path().collect::<Vec<_>>(), [leaf, leaf.parent().unwrap()]);
+        assert_eq!(
+            leaf.path().collect::<Vec<_>>(),
+            [leaf, leaf.parent().unwrap()]
+        );
     }
 }
