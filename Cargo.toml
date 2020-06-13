@@ -22,7 +22,7 @@ ash = { version = "0.31", optional = true }
 simdeez = { version = "1.0", optional = true }
 ncollide3d = { version = "0.23.1", optional = true }
 nphysics3d = { version = "0.16.0", optional = true }
-lru = { version = "0.4", optional = true }
+lru = { version = "0.5", optional = true }
 
 [dev-dependencies]
 winit = "0.22.2"
