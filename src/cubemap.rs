@@ -455,7 +455,7 @@ impl Coords {
         let Coords { x, y, face } = *self;
         let max = resolution - 1;
         let neighbor_chunk = |face: Face, edge: Edge| {
-            let (neighboring_face, neighbor_edge, parallel_axis) = face.neighbors()[edge as usize];
+            let (neighboring_face, neighbor_edge, parallel_axis) = face.neighbors()[edge];
             let other = match edge {
                 Edge::NX | Edge::PX => y,
                 Edge::NY | Edge::PY => x,
@@ -649,6 +649,19 @@ impl Neg for Edge {
             NX => PX,
             NY => PY,
         }
+    }
+}
+
+impl<T> Index<Edge> for [T] {
+    type Output = T;
+    fn index(&self, edge: Edge) -> &T {
+        &self[edge as usize]
+    }
+}
+
+impl<T> IndexMut<Edge> for [T] {
+    fn index_mut(&mut self, edge: Edge) -> &mut T {
+        &mut self[edge as usize]
     }
 }
 

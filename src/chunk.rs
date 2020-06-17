@@ -5,7 +5,7 @@ use na::RealField;
 
 #[cfg(feature = "simd")]
 use crate::cubemap::SampleIterSimd;
-use crate::cubemap::{Coords, Face, SampleIter};
+use crate::cubemap::{Coords, Edge, Face, SampleIter};
 
 /// A node of a quadtree on a particular cubemap face
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -86,19 +86,19 @@ impl Chunk {
         let depth = self.depth;
         [
             Chunk {
-                coords: x[0],
+                coords: x[Edge::NX],
                 depth,
             },
             Chunk {
-                coords: x[1],
+                coords: x[Edge::NY],
                 depth,
             },
             Chunk {
-                coords: x[2],
+                coords: x[Edge::PX],
                 depth,
             },
             Chunk {
-                coords: x[3],
+                coords: x[Edge::PY],
                 depth,
             },
         ]
