@@ -270,10 +270,10 @@ impl Walker {
 
         let children = chunk.chunk.children();
         let child_slots = [
-            mgr.get(&children[0]),
-            mgr.get(&children[1]),
-            mgr.get(&children[2]),
-            mgr.get(&children[3]),
+            mgr.get(&children[Edge::NX]),
+            mgr.get(&children[Edge::NY]),
+            mgr.get(&children[Edge::PX]),
+            mgr.get(&children[Edge::PY]),
         ];
         // The children of this chunk might be rendered if:
         let children_renderable = chunk.renderable // this subtree should be rendered at all, and
