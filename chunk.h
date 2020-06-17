@@ -11,8 +11,10 @@ struct Chunk {
     // Position of the chunk relative to the center of the planet, as if on the +Z face of the
     // cubemap
     vec3 origin;
-    // Level of detail of neighboring chunks
-    uint neighborhood;
+    // Level of detail of neighboring chunks (packed u8s)
+    uint lod_neighborhood;
+    // Indices of equal or lower LoD neighbors in the chunk buffer
+    uvec4 instance_neighborhood;
 };
 
 #endif

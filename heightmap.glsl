@@ -36,14 +36,18 @@ Vertex chunk_vertex(uint quads, float radius, sampler2DArray heightmaps, Chunk c
     uint verts = quads + 1;
     // Integer vertex coordinates within the chunk
     uvec2 quad_coord = uvec2(gl_VertexIndex % verts, gl_VertexIndex / verts);
-    uvec4 neighborhood = uvec4(chunk.neighborhood >> 24, (chunk.neighborhood >> 16) & 0xFF,
-                               (chunk.neighborhood >> 8) & 0xFF, chunk.neighborhood & 0xFF);
+    uint nx_lod = chunk.lod_neighborhood & 0xFF;
+    uint ny_lod = (chunk.lod_neighborhood >> 8) & 0xFF;
+    uint px_lod = (chunk.lod_neighborhood >> 16) & 0xFF;
+    uint py_lod = chunk.lod_neighborhood >> 24;
+
+    ivec4 lod_diffs = max(ivec4(0), ivec4(chunk.depth) - ivec4(nx_lod, ny_lod, px_lod, py_lod));
 
     // Make some edges degenerate to line up with lower neighboring LoDs
-    quad_coord.x &= (-1 << uint(quad_coord.y == 0) * neighborhood.y)
-        & (-1 << uint(quad_coord.y == quads) * neighborhood.w);
-    quad_coord.y &= (-1 << uint(quad_coord.x == 0) * neighborhood.x)
-        & (-1 << uint(quad_coord.x == quads) * neighborhood.z);
+    quad_coord.x &= (-1 << uint(quad_coord.y == 0) * lod_diffs.y)
+        & (-1 << uint(quad_coord.y == quads) * lod_diffs.w);
+    quad_coord.y &= (-1 << uint(quad_coord.x == 0) * lod_diffs.x)
+        & (-1 << uint(quad_coord.x == quads) * lod_diffs.z);
 
     vec2 unit_coords = vec2(quad_coord) / quads; // 0..1
     float offset = 0.5 / (quads+1);              // Center of the first texel

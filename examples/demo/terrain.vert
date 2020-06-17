@@ -9,7 +9,8 @@ layout(location = 4) in uvec2 chunk_coords;
 layout(location = 4, component = 2) in uint depth;
 layout(location = 4, component = 3) in uint slot;
 layout(location = 5) in vec3 origin;
-layout(location = 6) in uint neighborhood;
+layout(location = 6) in uint lod_neighborhood;
+layout(location = 7) in uvec4 instance_neighborhood;
 
 layout(location = 0) out vec2 texcoords;
 layout(location = 1) out vec3 normal;
@@ -22,7 +23,8 @@ void main() {
     chunk.depth = depth;
     chunk.slot = slot % CACHE_ARRAY_SIZE;
     chunk.origin = origin;
-    chunk.neighborhood = neighborhood;
+    chunk.lod_neighborhood = lod_neighborhood;
+    chunk.instance_neighborhood = instance_neighborhood;
     Vertex vert = chunk_vertex(QUAD_COUNT, RADIUS, heightmap[slot / CACHE_ARRAY_SIZE], chunk);
     gl_Position = projection * worldview * vec4(vert.position, 1);
     texcoords = vert.texcoords;

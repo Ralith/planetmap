@@ -12,6 +12,12 @@ layout(set = 0, binding = 0) uniform Uniforms {
 layout(set = 0, binding = 1) uniform sampler2DArray heightmap[CACHE_ARRAY_COUNT];
 layout(set = 0, binding = 2) uniform sampler2DArray normals[CACHE_ARRAY_COUNT];
 layout(set = 0, binding = 3) uniform sampler2DArray colors[CACHE_ARRAY_COUNT];
-layout(set = 0, binding = 4) readonly buffer Chunks {
-    Chunk chunks[];
+
+struct Instance {
+    mat4 worldview;
+    Chunk chunk;
+};
+
+layout(set = 0, binding = 4) readonly buffer Instances {
+    Instance instances[];
 };

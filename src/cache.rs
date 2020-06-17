@@ -1,5 +1,4 @@
 use hashbrown::HashMap;
-use std::ops::{Index, IndexMut};
 
 use slab::Slab;
 
@@ -12,6 +11,8 @@ struct Slot {
     ready: bool,
     /// Sequence number of the most recent frame this slot was rendered in
     in_frame: u64,
+    /// Position in the instance buffer, if being rendered
+    instance: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +130,7 @@ impl Manager {
             chunk,
             ready: false,
             in_frame: 0,
+            instance: 0,
         }) as u32;
         let old = self.index.insert(chunk, slot);
         debug_assert!(
@@ -168,19 +170,30 @@ impl Manager {
         }
 
         // Compute the neighborhood of each rendered chunk.
+        let index = &self.index;
+        let chunks = &self.chunks;
+        let frame = self.frame;
         for &mut (chunk, ref mut neighborhood, _) in &mut self.render {
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
-                for x in neighbor.path() {
-                    let slot = match self.index.get(&x) {
-                        None => continue,
-                        Some(&x) => x,
-                    };
-                    let state = &self.chunks[slot as usize];
-                    if state.ready && state.in_frame == self.frame {
-                        neighborhood[edge] =
-                            (chunk.depth - x.depth).min(self.config.max_neighbor_delta);
-                        break;
-                    }
+                if let Some((neighbor, instance)) = neighbor
+                    .path()
+                    .filter_map(|x| {
+                        let &slot = index.get(&x)?;
+                        let state = &chunks[slot as usize];
+                        if state.ready && state.in_frame == frame {
+                            Some((x, state.instance))
+                        } else {
+                            None
+                        }
+                    })
+                    .next()
+                {
+                    // There's a neighbor with an equal or lower LoD across this edge
+                    neighborhood.instances[edge] = instance;
+                    neighborhood.lods[edge] = neighbor.depth;
+                } else {
+                    // There are higher-LoD neighbors across this edge
+                    neighborhood.lods[edge] = chunk.depth + 1;
                 }
             }
         }
@@ -207,6 +220,7 @@ impl Manager {
                 .any(|v| needs_subdivision(&chunk.chunk, v));
         if !subdivide {
             if chunk.renderable {
+                self.chunks[chunk.slot.unwrap() as usize].instance = self.render.len() as u32;
                 self.render
                     .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
             }
@@ -245,8 +259,17 @@ impl Manager {
     }
 }
 
-/// For each edge of a particular chunk, this represents the number of LoD levels higher that chunk
-/// is than its neighbor on that edge.
+/// Result of a `Manager::update` operation
+pub struct State {
+    /// Chunks that can be rendered immediately, with their LoD neighborhood and slot index
+    pub render: Vec<(Chunk, Neighborhood, u32)>,
+    /// Chunks that should be loaded to improve the detail supplied by the `render` set in a future
+    /// `Manager::update` call for a similar `viewpoint`.
+    pub transfer: Vec<Chunk>,
+}
+
+/// For each edge of a particular chunk, this encodes the LoD and slot of its neighbors at an equal
+/// or lower LoD.
 ///
 /// Smoothly interpolating across chunk boundaries requires careful attention to these values. In
 /// particular, any visualization of chunk data should take care to be continuous at the edge with
@@ -254,43 +277,23 @@ impl Manager {
 /// terrain using heightmapped tiles should weld together a subset of the vertices on an edge shared
 /// with a lower-detail chunk.
 ///
-/// Note that increases in LoD are not represented here; it is always the responsibility of the
+/// Additionally, seamless rasterization requires computing bitwise-identical vertices on shared
+/// edges. This can be done by e.g. always using the transform of the chunk with a lower slot ID.
+///
+/// Note that higher-LoD neighbors are not representable. It is always the responsibility of the
 /// higher-detail chunk to account for neighboring lower-detail chunks.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+#[repr(C)]
 pub struct Neighborhood {
-    /// Decrease in LoD in the local -X direction
-    pub nx: u8,
-    /// Decrease in LoD in the local -Y direction
-    pub ny: u8,
-    /// Decrease in LoD in the local +X direction
-    pub px: u8,
-    /// Decrease in LoD in the local +Y direction
-    pub py: u8,
-}
-
-impl Index<Edge> for Neighborhood {
-    type Output = u8;
-    fn index(&self, edge: Edge) -> &u8 {
-        use Edge::*;
-        match edge {
-            NX => &self.nx,
-            NY => &self.ny,
-            PX => &self.px,
-            PY => &self.py,
-        }
-    }
-}
-
-impl IndexMut<Edge> for Neighborhood {
-    fn index_mut(&mut self, edge: Edge) -> &mut u8 {
-        use Edge::*;
-        match edge {
-            NX => &mut self.nx,
-            NY => &mut self.ny,
-            PX => &mut self.px,
-            PY => &mut self.py,
-        }
-    }
+    /// LoD across each edge
+    ///
+    /// If there are higher LoD chunks across an edge, the corresponding entry will be this chunk's
+    /// LoD plus one.
+    pub lods: [u8; 4],
+    /// The index of each edge in the render list
+    ///
+    /// If there are higher LoD chunks across an edge, the corresponding entry is zero.
+    pub instances: [u32; 4],
 }
 
 struct ChunkState {
@@ -436,14 +439,6 @@ mod test {
                 depth: 1,
             })
             .unwrap();
-        assert_ne!(
-            neighborhood,
-            Neighborhood {
-                nx: 0,
-                ny: 0,
-                px: 0,
-                py: 0
-            }
-        );
+        assert_ne!(neighborhood, Neighborhood::default());
     }
 }

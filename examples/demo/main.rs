@@ -18,7 +18,7 @@ use nphysics3d::object::{Body, DefaultBodySet, DefaultColliderSet, RigidBody};
 use nphysics3d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
 use winit::platform::desktop::EventLoopExtDesktop;
 
-use planetmap::ash::ChunkInstance;
+use planetmap::{ash::ChunkInstance, cache::Neighborhood};
 
 use planet::Planet;
 use window::*;
@@ -551,7 +551,7 @@ fn main() {
                     p_buffer_info: &vk::DescriptorBufferInfo {
                         buffer: cache.instance_buffer(),
                         offset: 0,
-                        range: mem::size_of::<Uniforms>() as u64,
+                        range: vk::WHOLE_SIZE,
                     },
                     ..Default::default()
                 },
@@ -628,7 +628,15 @@ fn main() {
                 location: 6,
                 binding: 0,
                 format: vk::Format::R32_UINT,
-                offset: offset_of!(ChunkInstance, neighborhood) as u32,
+                offset: (offset_of!(ChunkInstance, neighborhood) + offset_of!(Neighborhood, lods))
+                    as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 7,
+                binding: 0,
+                format: vk::Format::R32G32B32A32_UINT,
+                offset: (offset_of!(ChunkInstance, neighborhood)
+                    + offset_of!(Neighborhood, instances)) as u32,
             },
         ];
 

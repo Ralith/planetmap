@@ -8,7 +8,7 @@ use std::{mem, ptr, slice};
 use ash::version::{DeviceV1_0, InstanceV1_0};
 use ash::{vk, Device, Instance};
 
-use crate::{cache, Chunk};
+use crate::{cache, cache::Neighborhood, Chunk};
 
 /// A GPU-resident streaming LoD implementation for per-`Chunk` texture data
 pub struct Cache {
@@ -180,10 +180,7 @@ impl Cache {
                         depth: chunk.depth as u32,
                         slot,
                         origin,
-                        neighborhood: (neighborhood.nx as u32) << 24
-                            | (neighborhood.ny as u32) << 16
-                            | (neighborhood.px as u32) << 8
-                            | neighborhood.py as u32,
+                        neighborhood,
                     },
                 );
             }
@@ -407,7 +404,7 @@ pub struct ChunkInstance {
     pub depth: u32,
     pub slot: u32,
     pub origin: na::Point3<f32>,
-    pub neighborhood: u32,
+    pub neighborhood: Neighborhood,
 }
 
 fn find_memorytype_index(
