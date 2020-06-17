@@ -34,6 +34,7 @@ const CHUNK_NORMALS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 3;
 const CHUNK_COLORS_SIZE: u32 = CHUNK_HEIGHT_SIZE * 3;
 /// Amount of CPU-side staging memory to allocate for originating transfers
 const STAGING_BUFFER_LENGTH: u32 = 256;
+const INDEX_COUNT: u32 = CHUNK_QUADS * CHUNK_QUADS * 2 * 3;
 
 fn main() {
     unsafe {
@@ -287,6 +288,53 @@ fn main() {
             .bind_buffer_memory(uniform_buffer, uniform_buffer_memory, 0)
             .unwrap();
         let uniforms = &mut *uniform_ptr;
+
+        let index_buffer_info = vk::BufferCreateInfo {
+            size: mem::size_of::<u16>() as u64 * INDEX_COUNT as u64,
+            usage: vk::BufferUsageFlags::INDEX_BUFFER,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let index_buffer = base.device.create_buffer(&index_buffer_info, None).unwrap();
+        let index_buffer_memory_req = base.device.get_buffer_memory_requirements(index_buffer);
+        let index_buffer_memory_index = find_memorytype_index(
+            &index_buffer_memory_req,
+            &base.device_memory_properties,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+        )
+        .expect("Unable to find suitable memory type for the index buffer.");
+
+        let index_buffer_allocate_info = vk::MemoryAllocateInfo {
+            allocation_size: index_buffer_memory_req.size,
+            memory_type_index: index_buffer_memory_index,
+            ..Default::default()
+        };
+        let index_buffer_memory = base
+            .device
+            .allocate_memory(&index_buffer_allocate_info, None)
+            .unwrap();
+        let index_ptr = base
+            .device
+            .map_memory(
+                index_buffer_memory,
+                0,
+                index_buffer_memory_req.size,
+                vk::MemoryMapFlags::empty(),
+            )
+            .unwrap() as *mut u16;
+        base.device
+            .bind_buffer_memory(index_buffer, index_buffer_memory, 0)
+            .unwrap();
+        for i in 0..INDEX_COUNT {
+            let quad_vertex = i % 6;
+            let quad = i / 6;
+            let (x_off, y_off) =
+                [(0, 0), (1, 0), (1, 1), (0, 0), (1, 1), (0, 1)][quad_vertex as usize];
+            let x = (quad % CHUNK_QUADS) + x_off;
+            let y = (quad / CHUNK_QUADS) + y_off;
+            let vertex = y * CHUNK_HEIGHT_SIZE + x;
+            index_ptr.add(i as usize).write(vertex as u16);
+        }
 
         let staging_buffer_info = vk::BufferCreateInfo {
             size: (STAGED_CHUNK_SIZE * STAGING_BUFFER_LENGTH) as u64,
@@ -1067,7 +1115,8 @@ fn main() {
                             graphics_pipeline,
                         );
                         device.cmd_bind_vertex_buffers(cmd, 0, &[cache.instance_buffer()], &[0]);
-                        device.cmd_draw(cmd, CHUNK_QUADS * CHUNK_QUADS * 6, instances, 0, 0);
+                        device.cmd_bind_index_buffer(cmd, index_buffer, 0, vk::IndexType::UINT16);
+                        device.cmd_draw_indexed(cmd, INDEX_COUNT, instances, 0, 0, 0);
                     }
 
                     device.cmd_next_subpass(cmd, vk::SubpassContents::INLINE);
@@ -1126,6 +1175,8 @@ fn main() {
             .destroy_shader_module(fragment_shader_module, None);
         base.device.free_memory(staging_buffer_memory, None);
         base.device.destroy_buffer(staging_buffer, None);
+        base.device.free_memory(index_buffer_memory, None);
+        base.device.destroy_buffer(index_buffer, None);
         base.device.free_memory(uniform_buffer_memory, None);
         base.device.destroy_buffer(uniform_buffer, None);
         for &descriptor_set_layout in desc_set_layouts.iter() {
