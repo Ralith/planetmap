@@ -56,7 +56,9 @@ impl Cache {
                 .create_buffer(
                     &vk::BufferCreateInfo {
                         size: instances_size as u64,
-                        usage: vk::BufferUsageFlags::VERTEX_BUFFER,
+                        // Support both direct fetch as an instance buffer and random access for edge cases
+                        usage: vk::BufferUsageFlags::VERTEX_BUFFER
+                            | vk::BufferUsageFlags::STORAGE_BUFFER,
                         sharing_mode: vk::SharingMode::EXCLUSIVE,
                         ..Default::default()
                     },
@@ -252,7 +254,8 @@ impl Cache {
 
     /// Buffer containing a sequence of `Instance`s to be rendered
     ///
-    /// The number of instances to render is determined by calling `update`.
+    /// The number of instances to render is determined by calling `update`. Supports both vertex
+    /// and storage buffer usage.
     #[inline]
     pub fn instance_buffer(&self) -> vk::Buffer {
         self.instance_buffer

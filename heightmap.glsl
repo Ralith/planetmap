@@ -1,6 +1,8 @@
 #ifndef PLANETMAP_HEIGHTMAP_GLSL_
 #define PLANETMAP_HEIGHTMAP_GLSL_
 
+#include "chunk.h"
+
 struct Vertex {
     // Position of the vertex relative to Chunk.origin
     vec3 position;
@@ -11,20 +13,6 @@ struct Vertex {
     vec3 normal;
     // Unit vector perpendicular to normal
     vec3 tangent;
-};
-
-struct Chunk {
-    // Position within the chunk's depth in the quadtree
-    uvec2 coords;
-    // Depth in the quadtree
-    uint depth;
-    // Index of heightmap in the array texture.
-    uint slot;
-    // Position of the chunk relative to the center of the planet, as if on the +Z face of the
-    // cubemap
-    vec3 origin;
-    // Level of detail of neighboring chunks
-    uint neighborhood;
 };
 
 // Convert a point on a unit quad mapped to the current chunk into a point on the +Z surface of the

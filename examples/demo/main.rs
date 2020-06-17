@@ -398,6 +398,10 @@ fn main() {
                 descriptor_count: 1,
             },
             vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::STORAGE_BUFFER,
+                descriptor_count: 1,
+            },
+            vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 descriptor_count: cache.array_count() * 3,
             },
@@ -442,6 +446,13 @@ fn main() {
                 descriptor_count: cache.array_count(),
                 stage_flags: vk::ShaderStageFlags::FRAGMENT,
                 p_immutable_samplers: samplers.as_ptr(),
+                ..Default::default()
+            },
+            vk::DescriptorSetLayoutBinding {
+                binding: 4,
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
                 ..Default::default()
             },
         ];
@@ -530,6 +541,18 @@ fn main() {
                         })
                         .collect::<Vec<_>>()[..]
                         .as_ptr(),
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_set,
+                    dst_binding: 4,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                    p_buffer_info: &vk::DescriptorBufferInfo {
+                        buffer: cache.instance_buffer(),
+                        offset: 0,
+                        range: mem::size_of::<Uniforms>() as u64,
+                    },
                     ..Default::default()
                 },
             ],
