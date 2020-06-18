@@ -1017,7 +1017,9 @@ fn main() {
             uniforms.projection = viewport.projection(1e-2);
             uniforms.view = na::convert(camera.inverse());
             let view = camera.inverse();
-            let (instances, transfers) = cache.update(planet.radius() as f64, &na::convert(view));
+            let mut transfers = Vec::new();
+            let instances =
+                cache.update(planet.radius() as f64, &na::convert(view), &mut transfers);
 
             let mut transfer_slots = Vec::new();
             record_submit_commandbuffer(
