@@ -44,13 +44,14 @@ impl Cache {
         textures: &[TextureKind],
         sample_queue_family: u32,
     ) -> Self {
-        let slots = config.slots_needed() * 3 / 2;
+        let min_slots = config.slots_needed();
+        let slots = min_slots * 3 / 2;
         let mgr = cache::Manager::new(slots, config);
 
         unsafe {
             let device_memory_properties = instance.get_physical_device_memory_properties(pdevice);
 
-            let instances_size = std::mem::size_of::<ChunkInstance>() * slots;
+            let instances_size = std::mem::size_of::<ChunkInstance>() * min_slots;
             let instance_buffer = device
                 .create_buffer(
                     &vk::BufferCreateInfo {
