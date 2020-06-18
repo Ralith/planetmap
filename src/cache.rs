@@ -64,6 +64,7 @@ pub struct Manager {
     config: Config,
     /// Frame counter used to update `Slot.in_frame`
     frame: u64,
+    render: Vec<(Chunk, Neighborhood, u32)>,
 }
 
 impl Manager {
@@ -74,6 +75,7 @@ impl Manager {
             index: HashMap::with_capacity(slots),
             config,
             frame: 0,
+            render: Vec::with_capacity(slots),
         }
     }
 
@@ -82,32 +84,37 @@ impl Manager {
     ///
     /// Viewpoints should be positioned with regard to the sphere's origin, and scaled such
     /// viewpoints on the surface are 1.0 units from the sphere's origin.
-    pub fn update(&mut self, viewpoints: &[na::Point3<f64>]) -> State {
-        let mut walker = Walker::with_capacity(self.chunks.capacity());
-        walker.walk(self, viewpoints);
+    ///
+    /// Writes unavailable chunks needed for target quality to `transfer`.
+    pub fn update(&mut self, viewpoints: &[na::Point3<f64>], transfer: &mut Vec<Chunk>) {
+        transfer.clear();
+        self.render.clear();
+        self.walk(viewpoints, transfer);
 
         // Make room for transfers by discarding chunks that we don't currently need.
         let mut available = self.chunks.capacity() - self.chunks.len();
-        for idx in walker
-            .used
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(idx, used)| if used { None } else { Some(idx) })
-        {
-            if available >= walker.out.transfer.len() {
+        for idx in 0..self.chunks.capacity() {
+            if available >= transfer.len() {
                 break;
             }
-            if self.chunks.contains(idx as usize) && self.chunks[idx as usize].ready {
-                let old = self.chunks.remove(idx as usize);
-                self.index.remove(&old.chunk);
-                available += 1;
+            if !self.chunks.contains(idx as usize)
+                || !self.chunks[idx as usize].ready
+                || self.chunks[idx as usize].in_frame == self.frame
+            {
+                continue;
             }
+            let old = self.chunks.remove(idx as usize);
+            self.index.remove(&old.chunk);
+            available += 1;
         }
-        walker.out.transfer.truncate(available);
-
+        transfer.truncate(available);
         self.frame += 1;
-        walker.out
+    }
+
+    /// Chunks that can be rendered immediately, with their LoD neighborhood and slot index
+    #[inline]
+    pub fn renderable(&self) -> &[(Chunk, Neighborhood, u32)] {
+        &self.render
     }
 
     /// Allocate a slot for writing
@@ -143,15 +150,99 @@ impl Manager {
     fn get(&self, chunk: &Chunk) -> Option<u32> {
         self.index.get(chunk).cloned()
     }
-}
 
-/// Result of a `Manager::update` operation
-pub struct State {
-    /// Chunks that can be rendered immediately, with their LoD neighborhood and slot index
-    pub render: Vec<(Chunk, Neighborhood, u32)>,
-    /// Chunks that should be loaded to improve the detail supplied by the `render` set in a future
-    /// `Manager::update` call for a similar `viewpoint`.
-    pub transfer: Vec<Chunk>,
+    fn walk(&mut self, viewpoints: &[na::Point3<f64>], transfers: &mut Vec<Chunk>) {
+        // Gather the set of chunks we can should render and want to transfer
+        for chunk in Face::iter().map(Chunk::root) {
+            let slot = self.get(&chunk);
+            // Kick off the loop for each face's quadtree
+            self.walk_inner(
+                viewpoints,
+                transfers,
+                ChunkState {
+                    chunk,
+                    slot,
+                    renderable: slot.map_or(false, |idx| self.chunks[idx as usize].ready),
+                },
+            );
+        }
+
+        // Compute the neighborhood of each rendered chunk.
+        for &mut (chunk, ref mut neighborhood, _) in &mut self.render {
+            for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
+                for x in neighbor.path() {
+                    let slot = match self.index.get(&x) {
+                        None => continue,
+                        Some(&x) => x,
+                    };
+                    let state = &self.chunks[slot as usize];
+                    if state.ready && state.in_frame == self.frame {
+                        neighborhood[edge] =
+                            (chunk.depth - x.depth).min(self.config.max_neighbor_delta);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Walk the quadtree below `chunk`, recording chunks to render and transfer.
+    fn walk_inner(
+        &mut self,
+        viewpoints: &[na::Point3<f64>],
+        transfers: &mut Vec<Chunk>,
+        chunk: ChunkState,
+    ) {
+        // If this chunk is already associated with a cache slot, preserve that slot; otherwise,
+        // tell the caller we want it.
+        if let Some(idx) = chunk.slot {
+            self.chunks[idx as usize].in_frame = self.frame;
+        } else {
+            transfers.push(chunk.chunk);
+        }
+
+        let subdivide = chunk.chunk.depth < self.config.max_depth
+            && viewpoints
+                .iter()
+                .any(|v| needs_subdivision(&chunk.chunk, v));
+        if !subdivide {
+            if chunk.renderable {
+                self.render
+                    .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
+            }
+            return;
+        }
+
+        let children = chunk.chunk.children();
+        let child_slots = [
+            self.get(&children[Edge::NX]),
+            self.get(&children[Edge::NY]),
+            self.get(&children[Edge::PX]),
+            self.get(&children[Edge::PY]),
+        ];
+        // The children of this chunk might be rendered if:
+        let children_renderable = chunk.renderable // this subtree should be rendered at all, and
+            && child_slots                         // every child is already resident in the cache
+            .iter()
+            .all(|slot| slot.map_or(false, |x| self.chunks[x as usize].ready));
+        // If this subtree should be rendered and the children can't be rendered, this chunk must be rendered.
+        if chunk.renderable && !children_renderable {
+            self.render
+                .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
+        }
+        // Recurse into the children
+        for (&child, &slot) in children.iter().zip(child_slots.iter()) {
+            self.walk_inner(
+                viewpoints,
+                transfers,
+                ChunkState {
+                    chunk: child,
+                    renderable: children_renderable,
+                    slot,
+                },
+            );
+        }
+    }
 }
 
 /// For each edge of a particular chunk, this represents the number of LoD levels higher that chunk
@@ -202,114 +293,6 @@ impl IndexMut<Edge> for Neighborhood {
     }
 }
 
-struct Walker {
-    out: State,
-    used: Vec<bool>,
-}
-
-impl Walker {
-    fn with_capacity(capacity: usize) -> Self {
-        Self {
-            out: State {
-                render: Vec::new(),
-                transfer: Vec::new(),
-            },
-            used: vec![false; capacity],
-        }
-    }
-
-    fn walk(&mut self, mgr: &mut Manager, viewpoints: &[na::Point3<f64>]) {
-        // Gather the set of chunks we can should render and want to transfer
-        for chunk in Face::iter().map(Chunk::root) {
-            let slot = mgr.get(&chunk);
-            // Kick off the loop for each face's quadtree
-            self.walk_inner(
-                mgr,
-                viewpoints,
-                ChunkState {
-                    chunk,
-                    slot,
-                    renderable: slot.map_or(false, |idx| mgr.chunks[idx as usize].ready),
-                },
-            );
-        }
-
-        // Compute the neighborhood of each rendered chunk.
-        for &mut (chunk, ref mut neighborhood, _) in &mut self.out.render {
-            for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
-                // Compute the LoD difference to the rendered neighbor on this edge, if any
-                if let Some(neighbor) = neighbor.path().find(|x| {
-                    let slot = match mgr.get(&x) {
-                        None => return false,
-                        Some(x) => x,
-                    };
-                    let state = &mgr.chunks[slot as usize];
-                    state.ready && state.in_frame == mgr.frame
-                }) {
-                    neighborhood[edge] =
-                        (chunk.depth - neighbor.depth).min(mgr.config.max_neighbor_delta);
-                }
-            }
-        }
-    }
-
-    /// Walk the quadtree below `chunk`, recording chunks to render and transfer.
-    fn walk_inner(&mut self, mgr: &mut Manager, viewpoints: &[na::Point3<f64>], chunk: ChunkState) {
-        // If this chunk is already associated with a cache slot, preserve that slot; otherwise,
-        // tell the caller we want it.
-        if let Some(idx) = chunk.slot {
-            mgr.chunks[idx as usize].in_frame = mgr.frame;
-            self.used[idx as usize] = true;
-        } else {
-            self.out.transfer.push(chunk.chunk);
-        }
-
-        let subdivide = chunk.chunk.depth < mgr.config.max_depth
-            && viewpoints
-                .iter()
-                .any(|v| needs_subdivision(&chunk.chunk, v));
-        if !subdivide {
-            if chunk.renderable {
-                self.out
-                    .render
-                    .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
-            }
-            return;
-        }
-
-        let children = chunk.chunk.children();
-        let child_slots = [
-            mgr.get(&children[Edge::NX]),
-            mgr.get(&children[Edge::NY]),
-            mgr.get(&children[Edge::PX]),
-            mgr.get(&children[Edge::PY]),
-        ];
-        // The children of this chunk might be rendered if:
-        let children_renderable = chunk.renderable // this subtree should be rendered at all, and
-            && child_slots                         // every child is already resident in the cache
-            .iter()
-            .all(|slot| slot.map_or(false, |x| mgr.chunks[x as usize].ready));
-        // If this subtree should be rendered and the children can't be rendered, this chunk must be rendered.
-        if chunk.renderable && !children_renderable {
-            self.out
-                .render
-                .push((chunk.chunk, Neighborhood::default(), chunk.slot.unwrap()));
-        }
-        // Recurse into the children
-        for (&child, &slot) in children.iter().zip(child_slots.iter()) {
-            self.walk_inner(
-                mgr,
-                viewpoints,
-                ChunkState {
-                    chunk: child,
-                    renderable: children_renderable,
-                    slot,
-                },
-            );
-        }
-    }
-}
-
 struct ChunkState {
     chunk: Chunk,
     /// Cache slot associated with this chunk, whether or not it's ready
@@ -341,15 +324,16 @@ mod test {
     #[test]
     fn transfer_completeness() {
         let mut mgr = Manager::new(2048, Config::default());
-        let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
-        assert_eq!(state.render.len(), 0);
-        for transfer in state.transfer {
+        let mut transfers = Vec::new();
+        mgr.update(&[na::Point3::from(na::Vector3::z())], &mut transfers);
+        assert_eq!(mgr.renderable().len(), 0);
+        for &transfer in &transfers {
             let slot = mgr.allocate(transfer).unwrap();
             mgr.release(slot);
         }
-        let state = mgr.update(&[na::Point3::from(na::Vector3::z())]);
-        assert_eq!(state.transfer.len(), 0);
-        assert_ne!(state.render.len(), 0);
+        mgr.update(&[na::Point3::from(na::Vector3::z())], &mut transfers);
+        assert_eq!(transfers.len(), 0);
+        assert_ne!(mgr.renderable().len(), 0);
     }
 
     #[test]
@@ -362,8 +346,9 @@ mod test {
             };
             let needed = config.slots_needed();
             let mut mgr = Manager::new(2048, config);
-            let state = mgr.update(&[viewpoint]);
-            assert_eq!(state.transfer.len(), needed);
+            let mut transfers = Vec::new();
+            mgr.update(&[viewpoint], &mut transfers);
+            assert_eq!(transfers.len(), needed);
         }
     }
 
@@ -372,8 +357,9 @@ mod test {
         use crate::cubemap::Coords;
         let mut mgr = Manager::new(2048, Config::default());
         let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
-        let state = mgr.update(&[viewpoint]);
-        assert_eq!(state.render.len(), 0);
+        let mut transfers = Vec::new();
+        mgr.update(&[viewpoint], &mut transfers);
+        assert_eq!(mgr.renderable().len(), 0);
         // Get +X to LoD 1, +Y to LoD 0
         for &chunk in &[
             Chunk {
@@ -425,19 +411,20 @@ mod test {
                 depth: 1,
             },
         ] {
-            assert!(state.transfer.contains(&chunk));
+            assert!(transfers.contains(&chunk));
             let slot = mgr.allocate(chunk).unwrap();
             mgr.release(slot);
         }
 
         // Validate output
-        let state = mgr.update(&[viewpoint]);
-        assert_eq!(state.render.len(), 5);
+        let mut transfers = Vec::new();
+        mgr.update(&[viewpoint], &mut transfers);
+        assert_eq!(mgr.renderable().len(), 5);
         use std::collections::HashMap;
-        let neighbors = state
-            .render
-            .into_iter()
-            .map(|(chunk, neighbors, _slot)| (chunk, neighbors))
+        let neighbors = mgr
+            .renderable()
+            .iter()
+            .map(|&(chunk, neighbors, _slot)| (chunk, neighbors))
             .collect::<HashMap<_, _>>();
         let neighborhood = *neighbors
             .get(&Chunk {

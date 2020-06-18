@@ -152,21 +152,23 @@ impl Cache {
 
     /// Update instance buffer and compute transfers to initiate for a new `view` transform
     ///
-    /// Returns the number of elements now in the instance buffer and a list of non-resident chunks
-    /// that are wanted.
+    /// Returns the number of elements now in the instance buffer, and writes chunks that should be
+    /// transferred to `transfer`.
     pub fn update(
         &mut self,
         sphere_radius: f64,
         view: &na::IsometryMatrix3<f64>,
-    ) -> (u32, Vec<Chunk>) {
+        transfer: &mut Vec<Chunk>,
+    ) -> u32 {
         let viewpoint = view.inverse() * na::Point3::origin(); // Camera position in world space
-        let state = self.mgr.update(&[viewpoint / sphere_radius]);
-        let count = state.render.len() as u32;
+        self.mgr.update(&[viewpoint / sphere_radius], transfer);
+        let count = self.mgr.renderable().len() as u32;
         unsafe {
-            for (mem, (chunk, neighborhood, slot)) in (*self.instances)
+            for (mem, render) in (*self.instances)
                 .chunks_mut(mem::size_of::<ChunkInstance>())
-                .zip(state.render.into_iter())
+                .zip(self.mgr.renderable())
             {
+                let (ref chunk, neighborhood, slot) = *render;
                 let (origin, worldview) = chunk.worldview(sphere_radius, view);
                 ptr::write_unaligned(
                     mem.as_mut_ptr() as *mut _,
@@ -193,10 +195,11 @@ impl Cache {
                 }])
                 .unwrap()
         }
-        (count, state.transfer)
+        count
     }
 
     /// Allocate a cache slot to transfer texture data into
+    #[inline]
     pub fn allocate(&mut self, chunk: Chunk) -> Option<u32> {
         self.mgr.allocate(chunk)
     }
