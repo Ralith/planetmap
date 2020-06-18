@@ -1,4 +1,4 @@
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use std::ops::{Index, IndexMut};
 
 use slab::Slab;
@@ -10,6 +10,8 @@ struct Slot {
     chunk: Chunk,
     /// Whether the slot is ready for reading
     ready: bool,
+    /// Sequence number of the most recent frame this slot was rendered in
+    in_frame: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +62,8 @@ pub struct Manager {
     chunks: Slab<Slot>,
     index: HashMap<Chunk, u32>,
     config: Config,
+    /// Frame counter used to update `Slot.in_frame`
+    frame: u64,
 }
 
 impl Manager {
@@ -69,6 +73,7 @@ impl Manager {
             chunks: Slab::with_capacity(slots),
             index: HashMap::with_capacity(slots),
             config,
+            frame: 0,
         }
     }
 
@@ -79,7 +84,7 @@ impl Manager {
     /// viewpoints on the surface are 1.0 units from the sphere's origin.
     pub fn update(&mut self, viewpoints: &[na::Point3<f64>]) -> State {
         let mut walker = Walker::with_capacity(self.chunks.capacity());
-        walker.walk(&self, viewpoints);
+        walker.walk(self, viewpoints);
 
         // Make room for transfers by discarding chunks that we don't currently need.
         let mut available = self.chunks.capacity() - self.chunks.len();
@@ -101,6 +106,7 @@ impl Manager {
         }
         walker.out.transfer.truncate(available);
 
+        self.frame += 1;
         walker.out
     }
 
@@ -115,6 +121,7 @@ impl Manager {
         let slot = self.chunks.insert(Slot {
             chunk,
             ready: false,
+            in_frame: 0,
         }) as u32;
         let old = self.index.insert(chunk, slot);
         debug_assert!(
@@ -211,7 +218,7 @@ impl Walker {
         }
     }
 
-    fn walk(&mut self, mgr: &Manager, viewpoints: &[na::Point3<f64>]) {
+    fn walk(&mut self, mgr: &mut Manager, viewpoints: &[na::Point3<f64>]) {
         // Gather the set of chunks we can should render and want to transfer
         for chunk in Face::iter().map(Chunk::root) {
             let slot = mgr.get(&chunk);
@@ -227,17 +234,18 @@ impl Walker {
             );
         }
 
-        // Compute the LoD delta neighborhood of each rendered chunk
-        let rendering = self
-            .out
-            .render
-            .iter()
-            .map(|&(chunk, _, _)| chunk)
-            .collect::<HashSet<_>>();
+        // Compute the neighborhood of each rendered chunk.
         for &mut (chunk, ref mut neighborhood, _) in &mut self.out.render {
             for (edge, neighbor) in Edge::iter().zip(chunk.neighbors().iter()) {
                 // Compute the LoD difference to the rendered neighbor on this edge, if any
-                if let Some(neighbor) = neighbor.path().find(|x| rendering.contains(&x)) {
+                if let Some(neighbor) = neighbor.path().find(|x| {
+                    let slot = match mgr.get(&x) {
+                        None => return false,
+                        Some(x) => x,
+                    };
+                    let state = &mgr.chunks[slot as usize];
+                    state.ready && state.in_frame == mgr.frame
+                }) {
                     neighborhood[edge] =
                         (chunk.depth - neighbor.depth).min(mgr.config.max_neighbor_delta);
                 }
@@ -246,10 +254,11 @@ impl Walker {
     }
 
     /// Walk the quadtree below `chunk`, recording chunks to render and transfer.
-    fn walk_inner(&mut self, mgr: &Manager, viewpoints: &[na::Point3<f64>], chunk: ChunkState) {
+    fn walk_inner(&mut self, mgr: &mut Manager, viewpoints: &[na::Point3<f64>], chunk: ChunkState) {
         // If this chunk is already associated with a cache slot, preserve that slot; otherwise,
         // tell the caller we want it.
         if let Some(idx) = chunk.slot {
+            mgr.chunks[idx as usize].in_frame = mgr.frame;
             self.used[idx as usize] = true;
         } else {
             self.out.transfer.push(chunk.chunk);
