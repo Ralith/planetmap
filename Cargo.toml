@@ -32,7 +32,7 @@ memoffset = "0.5.4"
 half = "1.3.0"
 # empty feature set removes dependency on image 0.18.0
 noise = { version = "0.6.0", default-features = false }
-fuzzyblue = { git = "https://github.com/Ralith/fuzzyblue", rev = "5023a8cc95c6fdc462f1807e30be06b8bbaab651" }
+fuzzyblue = { git = "https://github.com/Ralith/fuzzyblue", rev = "4a523ab386b5709f7c6ea7c28e623e4c4ebd1ba1" }
 approx = "0.3.2"
 ash-window = "0.4.1"
 
