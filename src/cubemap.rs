@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 #[cfg(feature = "simd")]
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Neg};
-use std::{fmt, iter, vec};
+use std::{alloc, fmt, mem, ptr};
 
 use na::RealField;
 #[cfg(feature = "simd")]
@@ -16,26 +16,58 @@ use simdeez::Simd;
 /// For addressing purposes, texels along the edges and at the corners of a face do *not* overlap
 /// with their neighbors. Note that `Coords::samples` nonetheless *does* produce samples that will
 /// overlap along the edges of neighboring `Coords`.
-// TODO: Make this a DST so we can overlay it on Vulkan memory
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug)]
+#[repr(C)]
 pub struct CubeMap<T> {
-    resolution: usize,
-    // Could save a usize by using a thin pointer, but all the unsafety and effort probably isn't worth it.
-    data: Box<[T]>,
+    resolution: u32,
+    data: [T],
 }
 
 impl<T> CubeMap<T> {
+    /// Access a cubemap in existing memory
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must address a `u32` containing the cubemap's resolution, positioned just before the
+    /// cubemap's data. The addressed memory must outlive `'a` and have no outstanding unique
+    /// borrows.
+    pub unsafe fn from_raw<'a>(ptr: *const u32) -> &'a Self {
+        let dim = ptr.read() as usize;
+        let len = dim * dim * 6;
+        &*(ptr::slice_from_raw_parts(ptr, len) as *const Self)
+    }
+
+    /// Uniquely access a cubemap in existing memory
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must address a `u32` containing the cubemap's resolution, positioned just before the
+    /// cubemap's data. The addressed memory must outlive `'a` and have no outstanding borrows.
+    pub unsafe fn from_raw_mut<'a>(ptr: *mut u32) -> &'a mut Self {
+        let dim = ptr.read() as usize;
+        let len = dim * dim * 6;
+        &mut *(ptr::slice_from_raw_parts_mut(ptr, len) as *mut Self)
+    }
+
     /// Construct a cube map with faces containing `resolution * resolution` slots, each initialized
     /// to `value`.
-    pub fn new(resolution: usize, value: T) -> Self
+    pub fn new(resolution: u32, value: T) -> Box<Self>
     where
         T: Clone,
     {
-        Self {
-            resolution,
-            data: iter::repeat(value)
-                .take(resolution * resolution * 6)
-                .collect::<Box<[T]>>(),
+        let payload_len = resolution as usize * resolution as usize * 6;
+        let align = mem::align_of::<T>().max(4); // Also the size of the header with padding
+        let layout =
+            alloc::Layout::from_size_align(align + mem::size_of::<T>() * payload_len, align)
+                .unwrap();
+        unsafe {
+            let mem = alloc::alloc(layout);
+            mem.cast::<u32>().write(resolution);
+            let payload = mem.add(align).cast::<T>();
+            for i in 0..payload_len {
+                payload.add(i).write(value.clone());
+            }
+            Box::from_raw(ptr::slice_from_raw_parts_mut(mem, payload_len) as *mut Self)
         }
     }
 
@@ -44,30 +76,54 @@ impl<T> CubeMap<T> {
     ///
     /// Returns `None` if `data.len()` isn't correct for `resolution`, i.e. `resolution * resolution
     /// * 6`.
-    pub fn from_slice(resolution: usize, data: &[T]) -> Option<Self>
+    pub fn from_slice(resolution: u32, data: &[T]) -> Option<Box<Self>>
     where
         T: Copy,
     {
-        if data.len() != resolution * resolution * 6 {
+        let payload_len = resolution as usize * resolution as usize * 6;
+        if data.len() != payload_len {
             return None;
         }
-        Some(Self {
-            resolution,
-            data: data.into(),
-        })
+
+        let align = mem::align_of::<T>().max(4); // Also the size of the header with padding
+        let layout =
+            alloc::Layout::from_size_align(align + mem::size_of::<T>() * payload_len, align)
+                .unwrap();
+        unsafe {
+            let mem = alloc::alloc(layout);
+            mem.cast::<u32>().write(resolution);
+            let payload = mem.add(align).cast::<T>();
+            for (i, &x) in data.iter().enumerate() {
+                payload.add(i).write(x);
+            }
+            Some(Box::from_raw(
+                ptr::slice_from_raw_parts_mut(mem, payload_len) as *mut Self,
+            ))
+        }
     }
 
     /// Compute a cube map based on the direction of each slot
-    pub fn from_fn(resolution: usize, mut f: impl FnMut(na::Unit<na::Vector3<f32>>) -> T) -> Self {
-        Self {
-            resolution,
-            data: (0..resolution * resolution * 6)
-                .map(|index| f(get_dir(resolution, index).unwrap()))
-                .collect(),
+    pub fn from_fn(
+        resolution: u32,
+        mut f: impl FnMut(na::Unit<na::Vector3<f32>>) -> T,
+    ) -> Box<Self> {
+        let payload_len = resolution as usize * resolution as usize * 6;
+        let align = mem::align_of::<T>().max(4); // Also the size of the header with padding
+        let layout =
+            alloc::Layout::from_size_align(align + mem::size_of::<T>() * payload_len, align)
+                .unwrap();
+        unsafe {
+            let mem = alloc::alloc(layout);
+            mem.cast::<u32>().write(resolution);
+            let payload = mem.add(align).cast::<T>();
+            for i in 0..payload_len {
+                payload.add(i).write(f(get_dir(resolution, i).unwrap()));
+            }
+            Box::from_raw(ptr::slice_from_raw_parts_mut(mem, payload_len) as *mut Self)
         }
     }
 
-    pub fn resolution(&self) -> usize {
+    pub fn resolution(&self) -> u32 {
         self.resolution
     }
 
@@ -82,20 +138,20 @@ impl<T> CubeMap<T> {
 
 impl<T> AsRef<[T]> for CubeMap<T> {
     fn as_ref(&self) -> &[T] {
-        self.data.as_ref()
+        &self.data
     }
 }
 
 impl<T> AsMut<[T]> for CubeMap<T> {
     fn as_mut(&mut self) -> &mut [T] {
-        self.data.as_mut()
+        &mut self.data
     }
 }
 
 impl<T> Index<Face> for CubeMap<T> {
     type Output = [T];
     fn index(&self, face: Face) -> &[T] {
-        let face_size = self.resolution * self.resolution;
+        let face_size = self.resolution as usize * self.resolution as usize;
         let offset = face_size * face as usize;
         &self.data[offset..offset + face_size]
     }
@@ -103,7 +159,7 @@ impl<T> Index<Face> for CubeMap<T> {
 
 impl<T> IndexMut<Face> for CubeMap<T> {
     fn index_mut(&mut self, face: Face) -> &mut [T] {
-        let face_size = self.resolution * self.resolution;
+        let face_size = self.resolution as usize * self.resolution as usize;
         let offset = face_size * face as usize;
         &mut self.data[offset..offset + face_size]
     }
@@ -112,17 +168,17 @@ impl<T> IndexMut<Face> for CubeMap<T> {
 impl<T> Index<Coords> for CubeMap<T> {
     type Output = T;
     fn index(&self, coord: Coords) -> &T {
-        let face_size = self.resolution * self.resolution;
+        let face_size = self.resolution as usize * self.resolution as usize;
         let offset = face_size * coord.face as usize;
-        &self.data[offset + self.resolution * coord.y as usize + coord.x as usize]
+        &self.data[offset + self.resolution as usize * coord.y as usize + coord.x as usize]
     }
 }
 
 impl<T> IndexMut<Coords> for CubeMap<T> {
     fn index_mut(&mut self, coord: Coords) -> &mut T {
-        let face_size = self.resolution * self.resolution;
+        let face_size = self.resolution as usize * self.resolution as usize;
         let offset = face_size * coord.face as usize;
-        &mut self.data[offset + self.resolution * coord.y as usize + coord.x as usize]
+        &mut self.data[offset + self.resolution as usize * coord.y as usize + coord.x as usize]
     }
 }
 
@@ -139,52 +195,11 @@ impl<'a, T> IndexMut<&'a na::Vector3<f32>> for CubeMap<T> {
     }
 }
 
-fn index(resolution: usize, x: &na::Vector3<f32>) -> usize {
+fn index(resolution: u32, x: &na::Vector3<f32>) -> usize {
+    let resolution = resolution as usize;
     let (face, texcoords) = Face::coords(x);
     let texel = discretize(resolution, texcoords);
     face as usize * resolution * resolution + texel.1 * resolution + texel.0
-}
-
-impl<T> IntoIterator for CubeMap<T> {
-    type Item = (na::Unit<na::Vector3<f32>>, T);
-    type IntoIter = IntoIter<T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        IntoIter {
-            resolution: self.resolution,
-            data: self.data.into_vec().into_iter(),
-            index: 0,
-        }
-    }
-}
-
-pub struct IntoIter<T> {
-    resolution: usize,
-    data: vec::IntoIter<T>,
-    index: usize,
-}
-
-impl<T> Iterator for IntoIter<T> {
-    type Item = (na::Unit<na::Vector3<f32>>, T);
-    fn next(&mut self) -> Option<Self::Item> {
-        let dir = get_dir(self.resolution, self.index)?;
-        let value = self.data.next().unwrap();
-        self.index += 1;
-        Some((dir, value))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let total = self.resolution * self.resolution;
-        let remaining = (total - self.index) as usize;
-        (remaining, Some(remaining))
-    }
-}
-
-impl<T> ExactSizeIterator for IntoIter<T> {
-    fn len(&self) -> usize {
-        let total = self.resolution * self.resolution;
-        (total - self.index) as usize
-    }
 }
 
 impl<'a, T> IntoIterator for &'a CubeMap<T> {
@@ -201,7 +216,7 @@ impl<'a, T> IntoIterator for &'a CubeMap<T> {
 }
 
 pub struct Iter<'a, T> {
-    resolution: usize,
+    resolution: u32,
     data: &'a [T],
     index: usize,
 }
@@ -216,7 +231,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let total = self.resolution * self.resolution;
+        let total = self.resolution as usize * self.resolution as usize;
         let remaining = (total - self.index) as usize;
         (remaining, Some(remaining))
     }
@@ -224,7 +239,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
 impl<T> ExactSizeIterator for Iter<'_, T> {
     fn len(&self) -> usize {
-        let total = self.resolution * self.resolution;
+        let total = self.resolution as usize * self.resolution as usize;
         (total - self.index) as usize
     }
 }
@@ -243,7 +258,7 @@ impl<'a, T> IntoIterator for &'a mut CubeMap<T> {
 }
 
 pub struct IterMut<'a, T> {
-    resolution: usize,
+    resolution: u32,
     data: &'a mut [T],
     index: usize,
 }
@@ -259,7 +274,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let total = self.resolution * self.resolution;
+        let total = self.resolution as usize * self.resolution as usize;
         let remaining = (total - self.index) as usize;
         (remaining, Some(remaining))
     }
@@ -267,21 +282,21 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
 impl<T> ExactSizeIterator for IterMut<'_, T> {
     fn len(&self) -> usize {
-        let total = self.resolution * self.resolution;
+        let total = self.resolution as usize * self.resolution as usize;
         (total - self.index) as usize
     }
 }
 
-fn get_dir(resolution: usize, index: usize) -> Option<na::Unit<na::Vector3<f32>>> {
-    let face_size = resolution * resolution;
+fn get_dir(resolution: u32, index: usize) -> Option<na::Unit<na::Vector3<f32>>> {
+    let face_size = resolution as usize * resolution as usize;
     if index >= face_size * 6 {
         return None;
     }
     let face = [Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ][index / face_size];
     let rem = index % face_size;
-    let y = (rem / resolution) as u32;
-    let x = (rem % resolution) as u32;
-    Some(Coords { x, y, face }.center(resolution as u32))
+    let y = (rem / resolution as usize) as u32;
+    let x = (rem % resolution as usize) as u32;
+    Some(Coords { x, y, face }.center(resolution))
 }
 
 /// Face of a cube map, identified by direction
@@ -807,21 +822,24 @@ mod test {
 
     #[test]
     fn index_sanity() {
-        const RES: usize = 2048;
-        assert_eq!(index(RES, &na::Vector3::x_axis()), (RES / 2) * (RES + 1));
+        const RES: u32 = 2048;
+        assert_eq!(
+            index(RES, &na::Vector3::x_axis()) as u32,
+            (RES / 2) * (RES + 1)
+        );
     }
 
     #[test]
     fn iter() {
         for res in 0..8 {
             let map = CubeMap::new(res, 0);
-            assert_eq!(map.iter().count(), res * res * 6);
+            assert_eq!(map.iter().count() as u32, res * res * 6);
         }
     }
 
     #[test]
     fn addressing_roundtrip() {
-        const RES: usize = 2049; // must be odd for there to be a point exactly on the axes
+        const RES: u32 = 2049; // must be odd for there to be a point exactly on the axes
         for dir in &[
             na::Vector3::x_axis(),
             na::Vector3::y_axis(),
@@ -977,5 +995,16 @@ mod test {
 
         assert_eq!(discretize(2, na::Point2::new(0.49, 0.49)), (0, 0));
         assert_eq!(discretize(2, na::Point2::new(0.50, 0.50)), (1, 1));
+    }
+
+    #[test]
+    fn from_raw() {
+        let data = [1, 0, 1, 2, 3, 4, 5];
+        let x = unsafe { CubeMap::<u32>::from_raw(data.as_ptr()) };
+        assert_eq!(x.resolution(), 1);
+        assert_eq!(x.as_ref().len(), 6);
+        for i in 0..6 {
+            assert_eq!(x.as_ref()[i], data[i + 1]);
+        }
     }
 }
