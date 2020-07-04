@@ -568,26 +568,26 @@ fn main() {
             vk::VertexInputAttributeDescription {
                 location: 0,
                 binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
+                format: vk::Format::R32G32B32_SFLOAT,
                 offset: offset_of!(ChunkInstance, worldview) as u32,
             },
             vk::VertexInputAttributeDescription {
                 location: 1,
                 binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(ChunkInstance, worldview) as u32 + 16,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(ChunkInstance, worldview) as u32 + 12,
             },
             vk::VertexInputAttributeDescription {
                 location: 2,
                 binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(ChunkInstance, worldview) as u32 + 32,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(ChunkInstance, worldview) as u32 + 24,
             },
             vk::VertexInputAttributeDescription {
                 location: 3,
                 binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(ChunkInstance, worldview) as u32 + 48,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(ChunkInstance, worldview) as u32 + 36,
             },
             vk::VertexInputAttributeDescription {
                 location: 4,

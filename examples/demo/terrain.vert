@@ -4,7 +4,7 @@
 
 #include "terrain.h"
 
-layout(location = 0) in mat4 worldview;
+layout(location = 0) in mat4x3 worldview;
 layout(location = 4) in uvec2 chunk_coords;
 layout(location = 4, component = 2) in uint depth;
 layout(location = 4, component = 3) in uint slot;
@@ -24,7 +24,7 @@ void main() {
     chunk.origin = origin;
     chunk.neighborhood = neighborhood;
     Vertex vert = chunk_vertex(QUAD_COUNT, RADIUS, heightmap[slot / CACHE_ARRAY_SIZE], chunk);
-    gl_Position = projection * worldview * vec4(vert.position, 1);
+    gl_Position = projection * vec4(worldview * vec4(vert.position, 1), 1);
     texcoords = vert.texcoords;
     normal = mat3(worldview) * vert.normal;
     tangent = mat3(worldview) * vert.tangent;

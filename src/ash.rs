@@ -173,7 +173,10 @@ impl Cache {
                 ptr::write_unaligned(
                     mem.as_mut_ptr() as *mut _,
                     ChunkInstance {
-                        worldview: worldview.to_homogeneous(),
+                        worldview: worldview
+                            .to_homogeneous()
+                            .fixed_slice::<na::U3, na::U4>(0, 0)
+                            .into(),
                         coords: [chunk.coords.x, chunk.coords.y],
                         depth: chunk.depth as u32,
                         slot,
@@ -399,7 +402,7 @@ impl TextureArray {
 /// Structure contained in the `Cache`'s instance buffer
 #[repr(C)]
 pub struct ChunkInstance {
-    pub worldview: na::Matrix4<f32>,
+    pub worldview: na::Matrix3x4<f32>,
     pub coords: [u32; 2],
     pub depth: u32,
     pub slot: u32,
