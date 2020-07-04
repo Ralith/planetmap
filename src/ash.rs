@@ -160,7 +160,7 @@ impl Cache {
         view: &na::IsometryMatrix3<f64>,
         transfer: &mut Vec<Chunk>,
     ) -> u32 {
-        let viewpoint = view.inverse() * na::Point3::origin(); // Camera position in world space
+        let viewpoint = view.inverse_transform_point(&na::Point3::origin()); // Camera position in world space
         self.mgr.update(&[viewpoint / sphere_radius], transfer);
         let count = self.mgr.renderable().len() as u32;
         unsafe {
