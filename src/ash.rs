@@ -159,10 +159,9 @@ impl Cache {
         sphere_radius: f64,
         view: &na::IsometryMatrix3<f64>,
         transfer: &mut Vec<Chunk>,
-    ) -> u32 {
+    ) {
         let viewpoint = view.inverse_transform_point(&na::Point3::origin()); // Camera position in world space
         self.mgr.update(&[viewpoint / sphere_radius], transfer);
-        let count = self.mgr.renderable().len() as u32;
         unsafe {
             for (mem, render) in (*self.instances)
                 .chunks_mut(mem::size_of::<ChunkInstance>())
@@ -198,7 +197,12 @@ impl Cache {
                 }])
                 .unwrap()
         }
-        count
+    }
+
+    /// Number of instances to draw
+    #[inline]
+    pub fn instances(&self) -> u32 {
+        self.mgr.renderable().len() as u32
     }
 
     /// Allocate a cache slot to transfer texture data into

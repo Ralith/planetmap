@@ -1018,8 +1018,8 @@ fn main() {
             uniforms.view = na::convert(camera.inverse());
             let view = camera.inverse();
             let mut transfers = Vec::new();
-            let instances =
-                cache.update(planet.radius() as f64, &na::convert(view), &mut transfers);
+            cache.update(planet.radius() as f64, &na::convert(view), &mut transfers);
+            let instances = cache.instances();
 
             let mut transfer_slots = Vec::new();
             record_submit_commandbuffer(
