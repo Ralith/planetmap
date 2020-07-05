@@ -45,7 +45,7 @@ impl Cache {
         sample_queue_family: u32,
     ) -> Self {
         let min_slots = config.slots_needed();
-        let slots = min_slots * 3 / 2;
+        let slots = min_slots * 4 / 3;
         let mgr = cache::Manager::new(slots, config);
 
         unsafe {
