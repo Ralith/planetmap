@@ -446,4 +446,25 @@ mod test {
             }
         );
     }
+
+    #[test]
+    fn incremental_transfer() {
+        let mut mgr = Manager::new(2048, Config::default());
+        let viewpoint = na::Point3::from(na::Vector3::new(0.0, 1.0, 0.0));
+        let mut transfers = Vec::new();
+        mgr.update(&[viewpoint], &mut transfers);
+        let expected = transfers.len();
+        const BATCH_SIZE: usize = 17;
+        let mut actual = 0;
+        while !transfers.is_empty() {
+            for &chunk in transfers.iter().take(BATCH_SIZE) {
+                actual += 1;
+                let slot = mgr.allocate(chunk).unwrap();
+                mgr.release(slot);
+            }
+            transfers.clear();
+            mgr.update(&[viewpoint], &mut transfers);
+            assert_eq!(transfers.len(), expected - actual);
+        }
+    }
 }
