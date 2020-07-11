@@ -785,8 +785,25 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
             let dir_y = pos_on_face_y / len;
             let dir_z = S::set1_ps(1.0) / len;
 
+            let basis = self.coords.face.basis::<f32>();
+            let x = S::fmadd_ps(
+                S::set1_ps(basis.m11),
+                dir_x,
+                S::fmadd_ps(S::set1_ps(basis.m21), dir_y, S::set1_ps(basis.m31) * dir_z),
+            );
+            let y = S::fmadd_ps(
+                S::set1_ps(basis.m12),
+                dir_x,
+                S::fmadd_ps(S::set1_ps(basis.m22), dir_y, S::set1_ps(basis.m32) * dir_z),
+            );
+            let z = S::fmadd_ps(
+                S::set1_ps(basis.m13),
+                dir_x,
+                S::fmadd_ps(S::set1_ps(basis.m23), dir_y, S::set1_ps(basis.m33) * dir_z),
+            );
+
             self.index += S::VF32_WIDTH as u32;
-            Some([dir_x, dir_y, dir_z])
+            Some([x, y, z])
         }
     }
 
@@ -819,6 +836,7 @@ fn discretize(resolution: usize, texcoords: na::Point2<f32>) -> (usize, usize) {
 #[cfg(test)]
 mod test {
     use super::*;
+    use approx::*;
 
     #[test]
     fn index_sanity() {
@@ -1005,6 +1023,72 @@ mod test {
         assert_eq!(x.as_ref().len(), 6);
         for i in 0..6 {
             assert_eq!(x.as_ref()[i], data[i + 1]);
+        }
+    }
+
+    #[test]
+    fn samples_sanity() {
+        const COORDS: Coords = Coords {
+            x: 0,
+            y: 0,
+            face: Face::PY,
+        };
+        assert_abs_diff_eq!(COORDS.samples(1, 1).next().unwrap(), na::Vector3::y_axis());
+        let corners = COORDS
+            .samples(1, 2)
+            .map(|x| x.into_inner())
+            .collect::<Vec<_>>();
+        let corner = na::Unit::new_normalize(na::Vector3::new(1.0, 1.0, 1.0));
+        assert_abs_diff_eq!(
+            corners[..],
+            [
+                na::Vector3::new(-corner.x, corner.y, corner.z),
+                na::Vector3::new(corner.x, corner.y, corner.z),
+                na::Vector3::new(-corner.x, corner.y, -corner.z),
+                na::Vector3::new(corner.x, corner.y, -corner.z),
+            ][..]
+        );
+    }
+
+    #[test]
+    fn neighboring_samples_align() {
+        const LEFT: Coords = Coords {
+            x: 0,
+            y: 0,
+            face: Face::PZ,
+        };
+        const RIGHT: Coords = Coords {
+            x: 1,
+            y: 0,
+            face: Face::PZ,
+        };
+        let left = LEFT.samples(2, 2).collect::<Vec<_>>();
+        let right = RIGHT.samples(2, 2).collect::<Vec<_>>();
+        assert_abs_diff_eq!(left[1], right[0]);
+        assert_abs_diff_eq!(left[3], right[2]);
+    }
+
+    #[test]
+    #[cfg(feature = "simd")]
+    fn simd_samples_consistent() {
+        use simdeez::scalar::Scalar;
+
+        const COORDS: Coords = Coords {
+            x: 0,
+            y: 0,
+            face: Face::PY,
+        };
+        const FACE_RES: u32 = 1;
+        const CHUNK_RES: u32 = 17;
+        let scalar = COORDS.samples(FACE_RES, CHUNK_RES);
+        let simd = COORDS.samples_ps::<Scalar>(FACE_RES, CHUNK_RES);
+        assert_eq!(simd.len(), scalar.len());
+        for (scalar, [x, y, z]) in scalar.zip(simd) {
+            dbg!(x.0, y.0, z.0);
+            assert_abs_diff_eq!(
+                scalar,
+                na::Unit::new_unchecked(na::Vector3::new(x.0, y.0, z.0))
+            );
         }
     }
 }
