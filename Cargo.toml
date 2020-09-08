@@ -15,7 +15,7 @@ ncollide = ["ncollide3d", "lru"]
 nphysics = ["nphysics3d"]
 
 [dependencies]
-na = { package = "nalgebra", version = "0.21" }
+na = { package = "nalgebra", version = "0.22" }
 slab = "0.4.2"
 hashbrown = "0.9"
 ash = { version = "0.31", optional = true }
