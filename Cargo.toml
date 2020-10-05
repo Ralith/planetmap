@@ -25,7 +25,7 @@ nphysics3d = { version = "0.17.0", optional = true }
 lru = { version = "0.6", optional = true }
 
 [dev-dependencies]
-winit = "0.22.2"
+winit = "0.23.0"
 criterion = "0.3.2"
 vk-shader-macros = "0.2"
 memoffset = "0.5.4"
