@@ -28,7 +28,7 @@ lru = { version = "0.6", optional = true }
 winit = "0.23.0"
 criterion = "0.3.2"
 vk-shader-macros = "0.2"
-memoffset = "0.5.4"
+memoffset = "0.6.1"
 half = "1.3.0"
 # empty feature set removes dependency on image 0.18.0
 noise = { version = "0.6.0", default-features = false }
