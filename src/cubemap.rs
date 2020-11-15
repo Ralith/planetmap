@@ -56,14 +56,21 @@ impl<T> CubeMap<T> {
         T: Clone,
     {
         let payload_len = resolution as usize * resolution as usize * 6;
-        let align = mem::align_of::<T>().max(4); // Also the size of the header with padding
-        let layout =
-            alloc::Layout::from_size_align(align + mem::size_of::<T>() * payload_len, align)
-                .unwrap();
+        let header_layout = alloc::Layout::new::<u32>();
+        let (layout, offset) = header_layout
+            .extend(
+                alloc::Layout::from_size_align(
+                    mem::size_of::<T>() * payload_len,
+                    mem::align_of::<T>(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let layout = layout.pad_to_align();
         unsafe {
             let mem = alloc::alloc(layout);
             mem.cast::<u32>().write(resolution);
-            let payload = mem.add(align).cast::<T>();
+            let payload = mem.add(offset).cast::<T>();
             for i in 0..payload_len {
                 payload.add(i).write(value.clone());
             }
