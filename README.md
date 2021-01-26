@@ -46,23 +46,8 @@ example of this suitable for use in a vertex shader.
 
 ## Features
 
-- `ash` exposes a wrapper around `CacheManager` that simplifies
-  caching chunk data in Vulkan device-local memory based on a view
-  transform, using the Vulkan bindings by the same name
 - `ncollide` exposes helpers for nphysics-compatible collision
   detection against the surface of a radial heightmap
 - `simd` exposes `simdeez`-based iterators for data-parallel
   computation of sample coordinates within a `Chunk` or
   `chunk::Coord`, useful for fast noise sampling
-
-## Example
-
-Planetmap includes a simple, unoptimized Vulkan demo that can be
-launched with `cargo run --release --all-features --example demo`. Use
-WASDRF and click-and-drag to move; velocity is proportional to
-altitude. For simplicity, it skips important optimizations such as
-generating and transferring chunks asynchronously in background
-threads, memoizing noise function samplings across height/color/normal
-map computation, and precomputing coarse octaves of the noise function
-used. The jittery performance which results can be avoided in a real
-application by not blocking frame rendering on chunk generation.
