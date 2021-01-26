@@ -601,7 +601,7 @@ mod tests {
         let expected = 1.0 / 3.0f64.sqrt();
         for tri in tris {
             assert!(tri.normal().unwrap().z > 0.0);
-            for vert in &[tri.a(), tri.b(), tri.c()] {
+            for vert in &[tri.a, tri.b, tri.c] {
                 assert!(vert.z > 0.0);
                 for coord in &vert.coords {
                     assert_eq!(coord.abs(), expected);
