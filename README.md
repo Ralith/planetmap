@@ -28,21 +28,12 @@ level along a ray originating at the center of a planet. Streaming and
 level of detail can then be implemented with a `CacheManager`
 associated with GPU-resident buffers.
 
-The transform of a `Chunk` relative to a camera can be computed on the
-CPU using double precision and then rounded to single precision. This
-allows for efficient processing on a commodity GPU while providing
-high precision for positions close to the camera, because while a
-`Chunk` may be distant enough from the center of the planet to produce
-jitter when naively rendered from a nearby camera, its distance to
-such a camera is small, and can hence be represented much more
-accurately.
-
-Because every `Chunk` has a slightly different shape when mapped onto
-the surface of a sphere, to avoid discontinuities at LoD boundaries,
-and to reduce GPU memory and memory bandwith requirements, it is
-convenient to generate vertexes on-demand on the GPU based on
-heightmap data and `Chunk` coordinates. `heightmap.glsl` provides an
-example of this suitable for use in a vertex shader.
+When generating geometry to be displaced by the heightmap, care must
+be taken to ensure numerical stability and avoid hairline cracks
+between neighboring chunks. One effective tactic is to upload the
+corners of each chunk from the CPU, then find interior points using
+interpolation in a vertex shader, accounting for curvature using the
+law of sines.
 
 ## Features
 
