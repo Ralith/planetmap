@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 
 use hashbrown::hash_map;
 use hashbrown::HashMap;
-use lru::LruCache;
 use parry3d_f64::{
     bounding_volume::{BoundingSphere, BoundingVolume, AABB},
     mass_properties::MassProperties,
@@ -22,7 +21,10 @@ use parry3d_f64::{
     shape::{FeatureId, Shape, ShapeType, Triangle, TypedShape},
 };
 
-use crate::cubemap::Coords;
+use crate::{
+    cubemap::Coords,
+    lru_slab::{LruSlab, SlotId},
+};
 
 /// Height data source for `Planet`
 pub trait Terrain: Send + Sync + 'static {
@@ -74,7 +76,7 @@ pub struct Planet {
     radius: f64,
     chunk_resolution: u32,
     // Future work: could preallocate an arena for height samples
-    cache: Mutex<LruCache<Coords, ChunkData>>,
+    cache: Mutex<Cache>,
 }
 
 impl Planet {
@@ -86,7 +88,7 @@ impl Planet {
     /// `chunk_resolution` - number of heightfield samples along the edge of a chunk
     pub fn new(
         terrain: Arc<dyn Terrain>,
-        cache_size: usize,
+        cache_size: u32,
         radius: f64,
         chunk_resolution: u32,
     ) -> Self {
@@ -95,7 +97,7 @@ impl Planet {
             terrain,
             radius,
             chunk_resolution,
-            cache: Mutex::new(LruCache::new(cache_size)),
+            cache: Mutex::new(Cache::new(cache_size)),
         }
     }
 
@@ -141,12 +143,7 @@ impl Planet {
             na::convert(dir),
             bounds.radius().atan2(distance) as f32,
         ) {
-            let data = if let Some(x) = cache.get(&coords) {
-                x
-            } else {
-                cache.put(coords, ChunkData::new(self.sample(&coords)));
-                cache.get(&coords).unwrap()
-            };
+            let data = cache.get(self, &coords);
             if self.radius as f64 + data.max as f64 + bounds.radius() < distance {
                 // Short-circuit if `other` is way above this chunk
                 continue;
@@ -169,7 +166,7 @@ impl Clone for Planet {
     fn clone(&self) -> Self {
         Self {
             terrain: self.terrain.clone(),
-            cache: Mutex::new(LruCache::new(self.cache.lock().unwrap().cap())),
+            cache: Mutex::new(self.cache.lock().unwrap().clone()),
             ..*self
         }
     }
@@ -204,12 +201,7 @@ impl PointQuery for Planet {
         let coords = Coords::from_vector(self.terrain.face_resolution(), &na::convert(pt.coords));
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, pt);
         let cache = &mut *self.cache.lock().unwrap();
-        let data = if let Some(x) = cache.get(&coords) {
-            x
-        } else {
-            cache.put(coords, ChunkData::new(self.sample(&coords)));
-            cache.get(&coords).unwrap()
-        };
+        let data = cache.get(self, &coords);
         let (idx, (nearest, feature)) = ChunkTriangles::new(self, coords, &data.samples)
             .map(|tri| tri.project_local_point_and_get_feature(pt))
             .enumerate()
@@ -325,15 +317,54 @@ impl Iterator for ChunkTriangles<'_> {
     }
 }
 
+#[derive(Clone)]
+struct Cache {
+    slots: LruSlab<ChunkData>,
+    index: HashMap<Coords, SlotId>,
+}
+
+impl Cache {
+    pub fn new(capacity: u32) -> Self {
+        Self {
+            slots: LruSlab::with_capacity(capacity),
+            index: HashMap::with_capacity(capacity as usize),
+        }
+    }
+
+    pub fn get(&mut self, planet: &Planet, coords: &Coords) -> &ChunkData {
+        let (slot, old) = match self.index.entry(*coords) {
+            hash_map::Entry::Occupied(e) => (*e.get(), None),
+            hash_map::Entry::Vacant(e) => {
+                let old = if self.slots.len() == self.slots.capacity() {
+                    let lru = self.slots.lru().unwrap();
+                    Some(self.slots.remove(lru).coords)
+                } else {
+                    None
+                };
+                let slot = self
+                    .slots
+                    .insert(ChunkData::new(*coords, planet.sample(&coords)));
+                e.insert(slot);
+                (slot, old)
+            }
+        };
+        if let Some(old) = old {
+            self.index.remove(&old);
+        }
+        self.slots.get_mut(slot)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ChunkData {
     samples: Box<[f32]>,
+    coords: Coords,
     min: f32,
     max: f32,
 }
 
 impl ChunkData {
-    fn new(samples: Box<[f32]>) -> Self {
+    fn new(coords: Coords, samples: Box<[f32]>) -> Self {
         let mut iter = samples.iter().cloned();
         let first = iter.next().expect("empty sample array");
         let mut min = first;
@@ -345,7 +376,12 @@ impl ChunkData {
                 max = sample;
             }
         }
-        Self { samples, min, max }
+        Self {
+            samples,
+            coords,
+            min,
+            max,
+        }
     }
 }
 
