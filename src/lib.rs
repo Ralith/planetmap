@@ -7,5 +7,5 @@ pub use chunk::Chunk;
 pub mod cache;
 pub use cache::Manager as CacheManager;
 
-#[cfg(feature = "ncollide")]
-pub mod ncollide;
+#[cfg(feature = "parry")]
+pub mod parry;
