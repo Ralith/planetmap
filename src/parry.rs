@@ -117,23 +117,15 @@ impl Planet {
         samples
     }
 
-    fn feature_id(&self, _coords: &Coords, _triangle: usize, _tri_feature: FeatureId) -> FeatureId {
-        use FeatureId::*;
-        // TODO: Maintain an index into the cache, kept alive by live manifold generators, for improved stability
-        Unknown
-        // match tri_feature {
-        //     Vertex(n) => Vertex(triangle << 2 | n),
-        //     Edge(n) => Edge(triangle << 2 | n),
-        //     Face(_) => Face(triangle),
-        //     Unknown => Unknown,
-        // }
+    fn feature_id(&self, slot: SlotId, triangle: u32) -> u32 {
+        slot.0 * self.chunk_resolution * self.chunk_resolution + triangle
     }
 
     /// Applies the function `f` to all the triangles intersecting the given sphere
     pub fn map_elements_in_local_sphere(
         &self,
         bounds: &BoundingSphere,
-        mut f: impl FnMut(&Coords, u32, &Triangle),
+        mut f: impl FnMut(&Coords, SlotId, u32, &Triangle),
     ) {
         let dir = bounds.center().coords;
         let distance = dir.norm();
@@ -143,7 +135,7 @@ impl Planet {
             na::convert(dir),
             bounds.radius().atan2(distance) as f32,
         ) {
-            let data = cache.get(self, &coords);
+            let (slot, data) = cache.get(self, &coords);
             if self.radius as f64 + data.max as f64 + bounds.radius() < distance {
                 // Short-circuit if `other` is way above this chunk
                 continue;
@@ -156,7 +148,7 @@ impl Planet {
                         .intersects(&bounds)
                 })
             {
-                f(&coords, i as u32, &triangle)
+                f(&coords, slot, i as u32, &triangle)
             }
         }
     }
@@ -201,18 +193,18 @@ impl PointQuery for Planet {
         let coords = Coords::from_vector(self.terrain.face_resolution(), &na::convert(pt.coords));
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, pt);
         let cache = &mut *self.cache.lock().unwrap();
-        let data = cache.get(self, &coords);
-        let (idx, (nearest, feature)) = ChunkTriangles::new(self, coords, &data.samples)
-            .map(|tri| tri.project_local_point_and_get_feature(pt))
+        let (slot, data) = cache.get(self, &coords);
+        let (idx, nearest) = ChunkTriangles::new(self, coords, &data.samples)
+            .map(|tri| tri.project_local_point(pt, false))
             .enumerate()
-            .min_by(|(_, (x, _)), (_, (y, _))| {
+            .min_by(|(_, x), (_, y)| {
                 distance2(&x.point)
                     .partial_cmp(&distance2(&y.point))
                     .unwrap()
             })
             .unwrap();
         // TODO: Check neighborhood, so we don't miss as many cliff faces
-        (nearest, self.feature_id(&coords, idx, feature))
+        (nearest, FeatureId::Face(self.feature_id(slot, idx as u32)))
     }
 }
 
@@ -331,7 +323,7 @@ impl Cache {
         }
     }
 
-    pub fn get(&mut self, planet: &Planet, coords: &Coords) -> &ChunkData {
+    pub fn get(&mut self, planet: &Planet, coords: &Coords) -> (SlotId, &ChunkData) {
         let (slot, old) = match self.index.entry(*coords) {
             hash_map::Entry::Occupied(e) => (*e.get(), None),
             hash_map::Entry::Vacant(e) => {
@@ -351,7 +343,7 @@ impl Cache {
         if let Some(old) = old {
             self.index.remove(&old);
         }
-        self.slots.get_mut(slot)
+        (slot, self.slots.get_mut(slot))
     }
 }
 
@@ -524,7 +516,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
 
     let bounds = other.compute_bounding_sphere(pos12).loosened(prediction);
     let mut old_manifolds = std::mem::replace(manifolds, Vec::new());
-    planet.map_elements_in_local_sphere(&bounds, |&coords, index, triangle| {
+    planet.map_elements_in_local_sphere(&bounds, |&coords, slot, index, triangle| {
         let tri_state = match workspace.state.entry((coords, index)) {
             hash_map::Entry::Occupied(e) => {
                 let tri_state = e.into_mut();
@@ -543,8 +535,13 @@ fn compute_manifolds<ManifoldData, ContactData>(
                     color,
                 };
 
-                // TODO: Subshape IDs
-                manifolds.push(ContactManifold::with_data(0, 0, ManifoldData::default()));
+                let id = planet.feature_id(slot, index) as u32;
+                let (id1, id2) = if flipped { (0, id) } else { (id, 0) };
+                manifolds.push(ContactManifold::with_data(
+                    id1,
+                    id2,
+                    ManifoldData::default(),
+                ));
 
                 e.insert(tri_state)
             }
