@@ -422,12 +422,25 @@ impl QueryDispatcher for PlanetDispatcher {
 
     fn time_of_impact(
         &self,
-        _pos12: &Isometry<Real>,
-        _vel12: &Vector<Real>,
-        _g1: &dyn Shape,
-        _g2: &dyn Shape,
-        _max_toi: Real,
+        pos12: &Isometry<Real>,
+        vel12: &Vector<Real>,
+        g1: &dyn Shape,
+        g2: &dyn Shape,
+        max_toi: Real,
     ) -> Result<Option<TOI>, Unsupported> {
+        if let Some(p1) = g1.downcast_ref::<Planet>() {
+            return Ok(compute_toi(pos12, vel12, p1, g2, max_toi, false));
+        }
+        if let Some(p2) = g2.downcast_ref::<Planet>() {
+            return Ok(compute_toi(
+                &pos12.inverse(),
+                &-vel12,
+                p2,
+                g1,
+                max_toi,
+                true,
+            ));
+        }
         Err(Unsupported)
     }
 
@@ -443,6 +456,51 @@ impl QueryDispatcher for PlanetDispatcher {
     ) -> Result<Option<TOI>, Unsupported> {
         Err(Unsupported)
     }
+}
+
+fn compute_toi(
+    pos12: &Isometry<Real>,
+    vel12: &Vector<Real>,
+    planet: &Planet,
+    other: &dyn Shape,
+    max_toi: Real,
+    flipped: bool,
+) -> Option<TOI> {
+    let dispatcher = DefaultQueryDispatcher; // TODO after https://github.com/dimforge/parry/issues/8
+
+    let bounds = {
+        let start = other.compute_aabb(pos12);
+        let end = start.transform_by(&Isometry::from_parts((max_toi * vel12).into(), na::one()));
+        AABB::new(
+            Point::new(
+                start.mins.x.min(end.mins.x),
+                start.mins.y.min(end.mins.y),
+                start.mins.z.min(end.mins.z),
+            ),
+            Point::new(
+                start.maxs.x.min(end.maxs.x),
+                start.maxs.y.min(end.maxs.y),
+                start.maxs.z.min(end.maxs.z),
+            ),
+        )
+        .bounding_sphere()
+    };
+    let mut closest = None::<TOI>;
+    planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
+        let impact = if flipped {
+            dispatcher.time_of_impact(&pos12.inverse(), &-vel12, other, triangle, max_toi)
+        } else {
+            dispatcher.time_of_impact(pos12, vel12, triangle, other, max_toi)
+        };
+        if let Ok(Some(impact)) = impact {
+            closest = Some(match closest {
+                None => impact,
+                Some(x) if impact.toi < x.toi => impact,
+                Some(x) => x,
+            });
+        }
+    });
+    closest
 }
 
 impl<ManifoldData, ContactData> PersistentQueryDispatcher<ManifoldData, ContactData>
@@ -549,7 +607,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
 
         let manifold = &mut manifolds[tri_state.manifold_index];
 
-        // TODO: Why can we use convex-convex here?
+        // TODO: Nonconvex, postprocess contact `fid`s once parry's feature ID story is worked out
         if flipped {
             let _ = dispatcher.contact_manifold_convex_convex(
                 &pos12.inverse(),
@@ -594,7 +652,7 @@ struct TriangleState {
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use parry3d_f64::shape::Ball;
+    use parry3d_f64::{query::TOIStatus, shape::Ball};
 
     use crate::cubemap::Face;
 
@@ -694,5 +752,35 @@ mod tests {
         );
 
         assert!(ball_contacts(&planet, pos, BALL_RADIUS) > 0);
+    }
+
+    #[test]
+    fn toi_smoke() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        const DISTANCE: f64 = 10.0;
+        let ball = Ball { radius: 1.0 };
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            32,
+            PLANET_RADIUS,
+            17,
+        );
+
+        let impact = PlanetDispatcher
+            .time_of_impact(
+                &Isometry::translation(PLANET_RADIUS + DISTANCE, 0.0, 0.0),
+                &Vector::new(-1.0, 0.0, 0.0),
+                &planet,
+                &ball,
+                100.0,
+            )
+            .unwrap()
+            .expect("toi not found");
+        assert_eq!(impact.status, TOIStatus::Converged);
+        assert_relative_eq!(impact.toi, DISTANCE - ball.radius);
+        assert_relative_eq!(impact.witness1, Point::new(PLANET_RADIUS, 0.0, 0.0));
+        assert_relative_eq!(impact.witness2, Point::new(-ball.radius, 0.0, 0.0));
+        assert_relative_eq!(impact.normal1, Vector::x_axis());
+        assert_relative_eq!(impact.normal2, -Vector::x_axis());
     }
 }
