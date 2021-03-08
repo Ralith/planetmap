@@ -167,11 +167,31 @@ impl Clone for Planet {
 impl RayCast for Planet {
     fn cast_local_ray_and_get_normal(
         &self,
-        _ray: &Ray,
-        _max_toi: Real,
-        _solid: bool,
+        ray: &Ray,
+        max_toi: Real,
+        solid: bool,
     ) -> Option<RayIntersection> {
-        todo!()
+        // Compute the bounding sphere of the line segment, then brute-force every triangle within
+        // it. This is probably pretty inefficient for large values of `max_toi`; future work should
+        // explore more selective ways of finding candidate triangles, and possible early
+        // exits. Maybe walk chunks in order of distance within a certain margin of a ray, and reuse
+        // for TOI?
+        let bounds = {
+            let half_dir = ray.dir * max_toi * 0.5;
+            BoundingSphere::new(ray.origin + half_dir, half_dir.norm())
+        };
+        let mut closest = None::<RayIntersection>;
+        self.map_elements_in_local_sphere(&bounds, |_coords, slot, index, triangle| {
+            if let Some(mut hit) = triangle.cast_local_ray_and_get_normal(ray, max_toi, solid) {
+                hit.feature = FeatureId::Face(self.feature_id(slot, index));
+                closest = Some(match closest {
+                    None => hit,
+                    Some(x) if hit.toi < x.toi => hit,
+                    Some(x) => x,
+                });
+            }
+        });
+        closest
     }
 }
 
@@ -782,5 +802,29 @@ mod tests {
         assert_relative_eq!(impact.witness2, Point::new(-ball.radius, 0.0, 0.0));
         assert_relative_eq!(impact.normal1, Vector::x_axis());
         assert_relative_eq!(impact.normal2, -Vector::x_axis());
+    }
+
+    #[test]
+    fn ray_smoke() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        const DISTANCE: f64 = 10.0;
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            32,
+            PLANET_RADIUS,
+            17,
+        );
+        let hit = planet
+            .cast_local_ray_and_get_normal(
+                &Ray {
+                    origin: Point::new(PLANET_RADIUS + DISTANCE, 0.0, 0.0),
+                    dir: -Vector::x(),
+                },
+                100.0,
+                true,
+            )
+            .expect("hit not found");
+        assert_relative_eq!(hit.toi, DISTANCE);
+        assert_relative_eq!(hit.normal, Vector::x_axis(), epsilon = 1e-4);
     }
 }
