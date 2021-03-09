@@ -491,19 +491,7 @@ fn compute_toi(
     let bounds = {
         let start = other.compute_aabb(pos12);
         let end = start.transform_by(&Isometry::from_parts((max_toi * vel12).into(), na::one()));
-        AABB::new(
-            Point::new(
-                start.mins.x.min(end.mins.x),
-                start.mins.y.min(end.mins.y),
-                start.mins.z.min(end.mins.z),
-            ),
-            Point::new(
-                start.maxs.x.min(end.maxs.x),
-                start.maxs.y.min(end.maxs.y),
-                start.maxs.z.min(end.maxs.z),
-            ),
-        )
-        .bounding_sphere()
+        AABB::new(start.mins.inf(&end.mins), start.maxs.sup(&end.maxs)).bounding_sphere()
     };
     let mut closest = None::<TOI>;
     planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
