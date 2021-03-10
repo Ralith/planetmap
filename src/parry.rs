@@ -22,7 +22,7 @@ use parry3d_f64::{
 };
 
 use crate::{
-    cubemap::Coords,
+    cubemap::{Coords, Edge},
     lru_slab::{LruSlab, SlotId},
 };
 
@@ -171,28 +171,79 @@ impl RayCast for Planet {
         max_toi: Real,
         solid: bool,
     ) -> Option<RayIntersection> {
-        // Compute the bounding sphere of the line segment, then brute-force every triangle within
-        // it. This is probably pretty inefficient for large values of `max_toi`; future work should
-        // explore more selective ways of finding candidate triangles, and possible early
-        // exits. Maybe walk chunks in order of distance within a certain margin of a ray, and reuse
-        // for TOI?
-        let bounds = {
-            let half_dir = ray.dir * max_toi * 0.5;
-            BoundingSphere::new(ray.origin + half_dir, half_dir.norm())
-        };
-        let mut closest = None::<RayIntersection>;
-        self.map_elements_in_local_sphere(&bounds, |_coords, slot, index, triangle| {
-            if let Some(mut hit) = triangle.cast_local_ray_and_get_normal(ray, max_toi, solid) {
-                hit.feature = FeatureId::Face(self.feature_id(slot, index));
-                closest = Some(match closest {
-                    None => hit,
-                    Some(x) if hit.toi < x.toi => hit,
-                    Some(x) => x,
-                });
+        // Find the chunk containing the ray origin
+        let res = self.terrain.face_resolution();
+        let mut coords = Coords::from_vector(res, &ray.origin.coords.cast());
+
+        // Walk along the ray until we hit something
+        let cache = &mut *self.cache.lock().unwrap();
+        loop {
+            let (slot, data) = cache.get(self, &coords);
+            // FIXME: Rays can sometimes slip between the bounding planes of a chunk and the outer
+            // edge of the triangles within. To avoid this, we should extend boundary triangles to
+            // form a narrow skirt around the chunk, or check neighboring chunks when very close to
+            // a boundary.
+
+            // TODO: We could probably improve perf here by replacing the exhaustive ChunkTriangles
+            // scan with something that just walks along the path of the ray, similar to how chunks
+            // are traversed. Maybe even the same code?
+            if let Some((index, mut hit)) = ChunkTriangles::new(self, coords, &data.samples)
+                .filter_map(|tri| tri.cast_local_ray_and_get_normal(ray, max_toi, solid))
+                .enumerate()
+                .min_by(|(_, x), (_, y)| x.toi.partial_cmp(&y.toi).unwrap())
+            {
+                hit.feature = FeatureId::Face(self.feature_id(slot, index as u32));
+                return Some(hit);
             }
-        });
-        closest
+
+            match raycast_edges(res, &coords, ray, max_toi) {
+                None => return None,
+                Some((edge, _)) => {
+                    coords = coords.neighbors(res)[edge];
+                }
+            }
+        }
     }
+}
+
+/// Find the edge of `chunk` crossed by a ray from `origin` towards `direction`, if any. Assumes
+/// that `ray` passes through the cone defined by `chunk`.
+fn raycast_edges(
+    resolution: u32,
+    chunk: &Coords,
+    ray: &Ray,
+    max_toi: Real,
+) -> Option<(Edge, Real)> {
+    use parry3d_f64::shape::HalfSpace;
+
+    let edges: [(Edge, [[f64; 2]; 2]); 4] = [
+        (Edge::NX, [[0.0, 1.0], [0.0, 0.0]]),
+        (Edge::NY, [[0.0, 0.0], [1.0, 0.0]]),
+        (Edge::PX, [[1.0, 0.0], [1.0, 1.0]]),
+        (Edge::PY, [[1.0, 1.0], [0.0, 1.0]]),
+    ];
+
+    let mut closest = None;
+    for &(edge, corners) in edges.iter() {
+        // Construct inward-facing edge planes
+        let v1 = chunk.direction(resolution, &na::Point2::from(corners[0]));
+        let v2 = chunk.direction(resolution, &na::Point2::from(corners[1]));
+        let plane = HalfSpace {
+            normal: na::Unit::new_normalize(v1.cross(&v2)),
+        };
+        // Eliminate planes behind the ray
+        if plane.normal.as_ref().dot(&ray.dir) >= 0.0 {
+            continue;
+        }
+        if let Some(hit) = plane.cast_local_ray(ray, max_toi, true) {
+            closest = Some(match closest {
+                None => (edge, hit),
+                Some((_, toi)) if hit < toi => (edge, hit),
+                Some(x) => x,
+            });
+        }
+    }
+    closest
 }
 
 impl PointQuery for Planet {
@@ -486,12 +537,15 @@ fn compute_toi(
     max_toi: Real,
     flipped: bool,
 ) -> Option<TOI> {
-    let dispatcher = DefaultQueryDispatcher; // TODO after https://github.com/dimforge/parry/issues/8
-
+    // TODO after https://github.com/dimforge/parry/issues/8
+    let dispatcher = DefaultQueryDispatcher;
+    // TODO: To improve perf with large max_toi, select chunks similarly to ray casts, maybe using
+    // ray-sphere from hit point vs. ray through chunk vertex to detect secondary hits, from which
+    // no recursive traversal proceeds?
     let bounds = {
         let start = other.compute_aabb(pos12);
         let end = start.transform_by(&Isometry::from_parts((max_toi * vel12).into(), na::one()));
-        AABB::new(start.mins.inf(&end.mins), start.maxs.sup(&end.maxs)).bounding_sphere()
+        start.merged(&end).bounding_sphere()
     };
     let mut closest = None::<TOI>;
     planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
@@ -793,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn ray_smoke() {
+    fn ray_direct() {
         const PLANET_RADIUS: f64 = 6371e3;
         const DISTANCE: f64 = 10.0;
         let planet = Planet::new(
@@ -805,14 +859,70 @@ mod tests {
         let hit = planet
             .cast_local_ray_and_get_normal(
                 &Ray {
-                    origin: Point::new(PLANET_RADIUS + DISTANCE, 0.0, 0.0),
+                    origin: Point::new(PLANET_RADIUS + DISTANCE, 1.0, 1.0),
                     dir: -Vector::x(),
                 },
                 100.0,
                 true,
             )
             .expect("hit not found");
-        assert_relative_eq!(hit.toi, DISTANCE);
+        assert_relative_eq!(hit.toi, DISTANCE, epsilon = 1e-4);
         assert_relative_eq!(hit.normal, Vector::x_axis(), epsilon = 1e-4);
+
+        let hit = planet.cast_local_ray_and_get_normal(
+            &Ray {
+                origin: Point::new(PLANET_RADIUS + DISTANCE, 1.0, 1.0),
+                dir: Vector::x(),
+            },
+            100.0,
+            true,
+        );
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn ray_perp() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        const DISTANCE: f64 = 10.0;
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            32,
+            PLANET_RADIUS,
+            17,
+        );
+
+        for &dir in [Vector::x(), Vector::y(), -Vector::x(), -Vector::y()].iter() {
+            let hit = planet.cast_local_ray_and_get_normal(
+                &Ray {
+                    origin: Point::new(1.0, 1.0, PLANET_RADIUS + DISTANCE),
+                    dir,
+                },
+                10000.0,
+                true,
+            );
+            assert!(hit.is_none());
+        }
+    }
+
+    #[test]
+    fn ray_glancing() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        const DISTANCE: f64 = 1000.0;
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            32,
+            PLANET_RADIUS,
+            17,
+        );
+        planet
+            .cast_local_ray_and_get_normal(
+                &Ray {
+                    origin: Point::new(1.0, 1.0, PLANET_RADIUS + DISTANCE),
+                    dir: na::Vector3::new(1.5, 1.5, -1.0).normalize(),
+                },
+                1e5,
+                true,
+            )
+            .expect("hit not found");
     }
 }
