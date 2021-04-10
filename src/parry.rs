@@ -121,11 +121,12 @@ impl Planet {
         slot.0 * self.chunk_resolution * self.chunk_resolution + triangle
     }
 
-    /// Applies the function `f` to all the triangles intersecting the given sphere
+    /// Applies the function `f` to all the triangles intersecting the given sphere. Exits early on
+    /// `false` return.
     pub fn map_elements_in_local_sphere(
         &self,
         bounds: &BoundingSphere,
-        mut f: impl FnMut(&Coords, SlotId, u32, &Triangle),
+        mut f: impl FnMut(&Coords, SlotId, u32, &Triangle) -> bool,
     ) {
         let dir = bounds.center().coords;
         let distance = dir.norm();
@@ -148,7 +149,9 @@ impl Planet {
                         .intersects(&bounds)
                 })
             {
-                f(&coords, slot, i as u32, &triangle)
+                if !f(&coords, slot, i as u32, &triangle) {
+                    break;
+                }
             }
         }
     }
@@ -455,10 +458,16 @@ pub struct PlanetDispatcher;
 impl QueryDispatcher for PlanetDispatcher {
     fn intersection_test(
         &self,
-        _pos12: &Isometry<Real>,
-        _g1: &dyn Shape,
-        _g2: &dyn Shape,
+        pos12: &Isometry<Real>,
+        g1: &dyn Shape,
+        g2: &dyn Shape,
     ) -> Result<bool, Unsupported> {
+        if let Some(p1) = g1.downcast_ref::<Planet>() {
+            return Ok(intersects(pos12, p1, g2));
+        }
+        if let Some(p2) = g2.downcast_ref::<Planet>() {
+            return Ok(intersects(&pos12.inverse(), p2, g1));
+        }
         Err(Unsupported)
     }
 
@@ -529,6 +538,20 @@ impl QueryDispatcher for PlanetDispatcher {
     }
 }
 
+fn intersects(pos12: &Isometry<Real>, planet: &Planet, other: &dyn Shape) -> bool {
+    // TODO after https://github.com/dimforge/parry/issues/8
+    let dispatcher = DefaultQueryDispatcher;
+    let bounds = other.compute_bounding_sphere(pos12);
+    let mut intersects = false;
+    planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
+        intersects = dispatcher
+            .intersection_test(pos12, triangle, other)
+            .unwrap_or(false);
+        !intersects
+    });
+    intersects
+}
+
 fn compute_toi(
     pos12: &Isometry<Real>,
     vel12: &Vector<Real>,
@@ -561,6 +584,7 @@ fn compute_toi(
                 Some(x) => x,
             });
         }
+        true
     });
     closest
 }
@@ -682,6 +706,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
             let _ = dispatcher
                 .contact_manifold_convex_convex(pos12, triangle, other, prediction, manifold);
         }
+        true
     });
 
     workspace.state.retain(|_, x| x.color == color);
@@ -924,5 +949,32 @@ mod tests {
                 true,
             )
             .expect("hit not found");
+    }
+
+    #[test]
+    fn intersects_smoke() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        let ball = Ball { radius: 1.0 };
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            32,
+            PLANET_RADIUS,
+            17,
+        );
+
+        assert!(PlanetDispatcher
+            .intersection_test(
+                &Isometry::translation(PLANET_RADIUS, 0.0, 0.0),
+                &planet,
+                &ball,
+            )
+            .unwrap());
+        assert!(!PlanetDispatcher
+            .intersection_test(
+                &Isometry::translation(PLANET_RADIUS + ball.radius * 2.0, 0.0, 0.0),
+                &planet,
+                &ball,
+            )
+            .unwrap());
     }
 }
