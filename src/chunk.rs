@@ -86,19 +86,19 @@ impl Chunk {
         let depth = self.depth;
         [
             Chunk {
-                coords: x[Edge::NX],
+                coords: x[Edge::Nx],
                 depth,
             },
             Chunk {
-                coords: x[Edge::NY],
+                coords: x[Edge::Ny],
                 depth,
             },
             Chunk {
-                coords: x[Edge::PX],
+                coords: x[Edge::Px],
                 depth,
             },
             Chunk {
-                coords: x[Edge::PY],
+                coords: x[Edge::Py],
                 depth,
             },
         ]
@@ -189,14 +189,14 @@ mod test {
             }
         }
 
-        let chunk = Chunk::root(Face::PZ).children()[0];
+        let chunk = Chunk::root(Face::Pz).children()[0];
         assert_eq!(
             chunk.neighbors()[0],
             Chunk {
                 coords: Coords {
                     x: 0,
                     y: 1,
-                    face: NX
+                    face: Nx
                 },
                 depth: 1,
             }
@@ -207,7 +207,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 1,
-                    face: NY
+                    face: Ny
                 },
                 depth: 1,
             }
@@ -218,7 +218,7 @@ mod test {
                 coords: Coords {
                     x: 1,
                     y: 0,
-                    face: PZ
+                    face: Pz
                 },
                 depth: 1,
             }
@@ -229,7 +229,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 1,
-                    face: PZ
+                    face: Pz
                 },
                 depth: 1,
             }
@@ -240,7 +240,7 @@ mod test {
             coords: Coords {
                 x: 1,
                 y: 0,
-                face: PX,
+                face: Px,
             },
         };
         assert_eq!(chunk.neighbors()[0b01].neighbors()[0b10], chunk);
@@ -272,7 +272,7 @@ mod test {
 
     #[test]
     fn sample_count() {
-        let chunk = Chunk::root(Face::PZ);
+        let chunk = Chunk::root(Face::Pz);
         for i in 0..4 {
             assert_eq!(chunk.samples(i).count(), (i * i) as usize);
         }
@@ -281,11 +281,11 @@ mod test {
     #[test]
     fn sample_sanity() {
         assert_eq!(
-            Chunk::root(Face::PZ).samples(1).next().unwrap(),
+            Chunk::root(Face::Pz).samples(1).next().unwrap(),
             na::Vector3::z_axis()
         );
 
-        let chunk = Chunk::root(Face::PZ).children()[1];
+        let chunk = Chunk::root(Face::Pz).children()[1];
         assert!(chunk.samples(2).any(|x| x == na::Vector3::z_axis()));
 
         // Every face's
@@ -322,7 +322,7 @@ mod test {
             coords: Coords {
                 x: 12,
                 y: 34,
-                face: Face::PZ,
+                face: Face::Pz,
             },
         };
         let children = chunk.children();
@@ -342,7 +342,7 @@ mod test {
     #[test]
     fn origin_sanity() {
         assert_eq!(
-            Chunk::root(Face::PZ).origin_on_face::<f32>(),
+            Chunk::root(Face::Pz).origin_on_face::<f32>(),
             na::Vector3::z_axis()
         );
     }
@@ -352,7 +352,7 @@ mod test {
     fn simd_samples() {
         type S = simdeez::sse2::Sse2;
 
-        let chunk = Chunk::root(Face::PZ);
+        let chunk = Chunk::root(Face::Pz);
 
         let mut samples = chunk.samples(5);
         for [x, y, z] in chunk.samples_ps::<S>(5) {
@@ -375,7 +375,7 @@ mod test {
             coords: Coords {
                 x: 1,
                 y: 1,
-                face: Face::PY,
+                face: Face::Py,
             },
             depth: 1,
         };

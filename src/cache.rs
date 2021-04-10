@@ -215,10 +215,10 @@ impl Manager {
 
         let children = chunk.chunk.children();
         let child_slots = [
-            self.get(&children[Edge::NX]),
-            self.get(&children[Edge::NY]),
-            self.get(&children[Edge::PX]),
-            self.get(&children[Edge::PY]),
+            self.get(&children[Edge::Nx]),
+            self.get(&children[Edge::Ny]),
+            self.get(&children[Edge::Px]),
+            self.get(&children[Edge::Py]),
         ];
         // The children of this chunk might be rendered if:
         let children_renderable = chunk.renderable // this subtree should be rendered at all, and
@@ -273,10 +273,10 @@ impl Index<Edge> for Neighborhood {
     fn index(&self, edge: Edge) -> &u8 {
         use Edge::*;
         match edge {
-            NX => &self.nx,
-            NY => &self.ny,
-            PX => &self.px,
-            PY => &self.py,
+            Nx => &self.nx,
+            Ny => &self.ny,
+            Px => &self.px,
+            Py => &self.py,
         }
     }
 }
@@ -285,10 +285,10 @@ impl IndexMut<Edge> for Neighborhood {
     fn index_mut(&mut self, edge: Edge) -> &mut u8 {
         use Edge::*;
         match edge {
-            NX => &mut self.nx,
-            NY => &mut self.ny,
-            PX => &mut self.px,
-            PY => &mut self.py,
+            Nx => &mut self.nx,
+            Ny => &mut self.ny,
+            Px => &mut self.px,
+            Py => &mut self.py,
         }
     }
 }
@@ -366,7 +366,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 0,
-                    face: Face::PX,
+                    face: Face::Px,
                 },
                 depth: 0,
             },
@@ -374,7 +374,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 0,
-                    face: Face::PY,
+                    face: Face::Py,
                 },
                 depth: 0,
             },
@@ -382,7 +382,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 0,
-                    face: Face::PX,
+                    face: Face::Px,
                 },
                 depth: 1,
             },
@@ -390,7 +390,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 1,
-                    face: Face::PX,
+                    face: Face::Px,
                 },
                 depth: 1,
             },
@@ -398,7 +398,7 @@ mod test {
                 coords: Coords {
                     x: 1,
                     y: 0,
-                    face: Face::PX,
+                    face: Face::Px,
                 },
                 depth: 1,
             },
@@ -406,7 +406,7 @@ mod test {
                 coords: Coords {
                     x: 1,
                     y: 1,
-                    face: Face::PX,
+                    face: Face::Px,
                 },
                 depth: 1,
             },
@@ -431,7 +431,7 @@ mod test {
                 coords: Coords {
                     x: 0,
                     y: 0,
-                    face: Face::PX,
+                    face: Face::Px,
                 },
                 depth: 1,
             })

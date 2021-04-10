@@ -217,10 +217,10 @@ fn raycast_edges(
     use parry3d_f64::shape::HalfSpace;
 
     let edges: [(Edge, [[f64; 2]; 2]); 4] = [
-        (Edge::NX, [[0.0, 1.0], [0.0, 0.0]]),
-        (Edge::NY, [[0.0, 0.0], [1.0, 0.0]]),
-        (Edge::PX, [[1.0, 0.0], [1.0, 1.0]]),
-        (Edge::PY, [[1.0, 1.0], [0.0, 1.0]]),
+        (Edge::Nx, [[0.0, 1.0], [0.0, 0.0]]),
+        (Edge::Ny, [[0.0, 0.0], [1.0, 0.0]]),
+        (Edge::Px, [[1.0, 0.0], [1.0, 1.0]]),
+        (Edge::Py, [[1.0, 1.0], [0.0, 1.0]]),
     ];
 
     let mut closest = None;
@@ -726,7 +726,7 @@ mod tests {
         let coords = Coords {
             x: 0,
             y: 0,
-            face: Face::PZ,
+            face: Face::Pz,
         };
         let samples = planet.sample(&coords);
         let tris = ChunkTriangles::new(&planet, coords, &samples[..]);
