@@ -299,7 +299,7 @@ fn get_dir(resolution: u32, index: usize) -> Option<na::Unit<na::Vector3<f32>>> 
     if index >= face_size * 6 {
         return None;
     }
-    let face = [Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ][index / face_size];
+    let face = [Face::Px, Face::Nx, Face::Py, Face::Ny, Face::Pz, Face::Nz][index / face_size];
     let rem = index % face_size;
     let y = (rem / resolution as usize) as u32;
     let x = (rem % resolution as usize) as u32;
@@ -311,29 +311,29 @@ fn get_dir(resolution: u32, index: usize) -> Option<na::Unit<na::Vector3<f32>>> 
 #[repr(u8)]
 pub enum Face {
     /// The face in the +X direction
-    PX,
+    Px,
     /// The face in the -X direction
-    NX,
+    Nx,
     /// The face in the +Y direction
-    PY,
+    Py,
     /// The face in the -Y direction
-    NY,
+    Ny,
     /// The face in the +Z direction
-    PZ,
+    Pz,
     /// The face in the -Z direction
-    NZ,
+    Nz,
 }
 
 impl fmt::Display for Face {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::Face::*;
         let s = match *self {
-            PX => "+X",
-            NX => "-X",
-            PY => "+Y",
-            NY => "-Y",
-            PZ => "+Z",
-            NZ => "-Z",
+            Px => "+X",
+            Nx => "-X",
+            Py => "+Y",
+            Ny => "-Y",
+            Pz => "+Z",
+            Nz => "-Z",
         };
         f.write_str(s)
     }
@@ -344,12 +344,12 @@ impl Neg for Face {
     fn neg(self) -> Self {
         use self::Face::*;
         match self {
-            PX => NX,
-            PY => NY,
-            PZ => NZ,
-            NX => PX,
-            NY => PY,
-            NZ => PZ,
+            Px => Nx,
+            Py => Ny,
+            Pz => Nz,
+            Nx => Px,
+            Ny => Py,
+            Nz => Pz,
         }
     }
 }
@@ -359,7 +359,7 @@ impl Face {
     pub fn from_vector<N: RealField + PartialOrd>(x: &na::Vector3<N>) -> Self {
         let (&value, &axis) = x
             .iter()
-            .zip(&[Face::PX, Face::PY, Face::PZ])
+            .zip(&[Face::Px, Face::Py, Face::Pz])
             .max_by(|(l, _), (r, _)| l.abs().partial_cmp(&r.abs()).unwrap_or(Ordering::Less))
             .unwrap();
         if value.is_sign_negative() {
@@ -384,19 +384,19 @@ impl Face {
     pub fn basis<N: RealField>(self) -> na::Rotation3<N> {
         use self::Face::*;
         let (x, y, z) = match self {
-            PX => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
-            NX => (-na::Vector3::z(), -na::Vector3::y(), -na::Vector3::x()),
-            PY => (na::Vector3::x(), -na::Vector3::z(), na::Vector3::y()),
-            NY => (na::Vector3::x(), na::Vector3::z(), -na::Vector3::y()),
-            PZ => (na::Vector3::x(), na::Vector3::y(), na::Vector3::z()),
-            NZ => (-na::Vector3::x(), na::Vector3::y(), -na::Vector3::z()),
+            Px => (na::Vector3::z(), -na::Vector3::y(), na::Vector3::x()),
+            Nx => (-na::Vector3::z(), -na::Vector3::y(), -na::Vector3::x()),
+            Py => (na::Vector3::x(), -na::Vector3::z(), na::Vector3::y()),
+            Ny => (na::Vector3::x(), na::Vector3::z(), -na::Vector3::y()),
+            Pz => (na::Vector3::x(), na::Vector3::y(), na::Vector3::z()),
+            Nz => (-na::Vector3::x(), na::Vector3::y(), -na::Vector3::z()),
         };
         na::Rotation3::from_matrix_unchecked(na::Matrix3::from_columns(&[x, y, z]))
     }
 
     /// Iterator over all `Face`s
     pub fn iter() -> impl Iterator<Item = Face> {
-        const VALUES: &[Face] = &[Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ];
+        const VALUES: &[Face] = &[Face::Px, Face::Nx, Face::Py, Face::Ny, Face::Pz, Face::Nz];
         VALUES.iter().cloned()
     }
 
@@ -408,41 +408,41 @@ impl Face {
     pub(crate) fn neighbors(self) -> &'static [(Face, Edge, bool); 4] {
         use self::Face::*;
         match self {
-            PX => &[
-                (NZ, Edge::NX, false),
-                (PY, Edge::PX, false),
-                (PZ, Edge::PX, false),
-                (NY, Edge::PX, true),
+            Px => &[
+                (Nz, Edge::Nx, false),
+                (Py, Edge::Px, false),
+                (Pz, Edge::Px, false),
+                (Ny, Edge::Px, true),
             ],
-            NX => &[
-                (PZ, Edge::NX, false),
-                (PY, Edge::NX, true),
-                (NZ, Edge::PX, false),
-                (NY, Edge::NX, false),
+            Nx => &[
+                (Pz, Edge::Nx, false),
+                (Py, Edge::Nx, true),
+                (Nz, Edge::Px, false),
+                (Ny, Edge::Nx, false),
             ],
-            PY => &[
-                (NX, Edge::NY, true),
-                (PZ, Edge::PY, true),
-                (PX, Edge::NY, false),
-                (NZ, Edge::PY, false),
+            Py => &[
+                (Nx, Edge::Ny, true),
+                (Pz, Edge::Py, true),
+                (Px, Edge::Ny, false),
+                (Nz, Edge::Py, false),
             ],
-            NY => &[
-                (NX, Edge::PY, false),
-                (NZ, Edge::NY, false),
-                (PX, Edge::PY, true),
-                (PZ, Edge::NY, true),
+            Ny => &[
+                (Nx, Edge::Py, false),
+                (Nz, Edge::Ny, false),
+                (Px, Edge::Py, true),
+                (Pz, Edge::Ny, true),
             ],
-            PZ => &[
-                (NX, Edge::NX, false),
-                (NY, Edge::PY, true),
-                (PX, Edge::PX, false),
-                (PY, Edge::NY, true),
+            Pz => &[
+                (Nx, Edge::Nx, false),
+                (Ny, Edge::Py, true),
+                (Px, Edge::Px, false),
+                (Py, Edge::Ny, true),
             ],
-            NZ => &[
-                (PX, Edge::NX, false),
-                (NY, Edge::NY, false),
-                (NX, Edge::PX, false),
-                (PY, Edge::PY, false),
+            Nz => &[
+                (Px, Edge::Nx, false),
+                (Ny, Edge::Ny, false),
+                (Nx, Edge::Px, false),
+                (Py, Edge::Py, false),
             ],
         }
     }
@@ -479,15 +479,15 @@ impl Coords {
         let neighbor_chunk = |face: Face, edge: Edge| {
             let (neighboring_face, neighbor_edge, parallel_axis) = face.neighbors()[edge];
             let other = match edge {
-                Edge::NX | Edge::PX => y,
-                Edge::NY | Edge::PY => x,
+                Edge::Nx | Edge::Px => y,
+                Edge::Ny | Edge::Py => x,
             };
             let other = if parallel_axis { other } else { max - other };
             let (x, y) = match neighbor_edge {
-                Edge::NX => (0, other),
-                Edge::NY => (other, 0),
-                Edge::PX => (max, other),
-                Edge::PY => (other, max),
+                Edge::Nx => (0, other),
+                Edge::Ny => (other, 0),
+                Edge::Px => (max, other),
+                Edge::Py => (other, max),
             };
             Coords {
                 x,
@@ -497,22 +497,22 @@ impl Coords {
         };
         [
             if x == 0 {
-                neighbor_chunk(face, Edge::NX)
+                neighbor_chunk(face, Edge::Nx)
             } else {
                 Coords { x: x - 1, y, face }
             },
             if y == 0 {
-                neighbor_chunk(face, Edge::NY)
+                neighbor_chunk(face, Edge::Ny)
             } else {
                 Coords { x, y: y - 1, face }
             },
             if x == max {
-                neighbor_chunk(face, Edge::PX)
+                neighbor_chunk(face, Edge::Px)
             } else {
                 Coords { x: x + 1, y, face }
             },
             if y == max {
-                neighbor_chunk(face, Edge::PY)
+                neighbor_chunk(face, Edge::Py)
             } else {
                 Coords { x, y: y + 1, face }
             },
@@ -648,16 +648,16 @@ impl Coords {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Edge {
-    NX = 0,
-    NY = 1,
-    PX = 2,
-    PY = 3,
+    Nx = 0,
+    Ny = 1,
+    Px = 2,
+    Py = 3,
 }
 
 impl Edge {
     /// Iterator over all `Edge`s
     pub fn iter() -> impl Iterator<Item = Edge> {
-        [Edge::NX, Edge::NY, Edge::PX, Edge::PY].iter().cloned()
+        [Edge::Nx, Edge::Ny, Edge::Px, Edge::Py].iter().cloned()
     }
 }
 
@@ -666,10 +666,10 @@ impl Neg for Edge {
     fn neg(self) -> Self {
         use self::Edge::*;
         match self {
-            PX => NX,
-            PY => NY,
-            NX => PX,
-            NY => PY,
+            Px => Nx,
+            Py => Ny,
+            Nx => Px,
+            Ny => Py,
         }
     }
 }
@@ -884,20 +884,20 @@ mod test {
     #[test]
     fn face_neighbors() {
         // Opposite faces are incident to opposite edges
-        assert_eq!(Face::PX.neighbors()[0b00].1, -Face::NX.neighbors()[0b10].1);
-        assert_eq!(Face::PX.neighbors()[0b01].1, -Face::NX.neighbors()[0b01].1);
-        assert_eq!(Face::PX.neighbors()[0b10].1, -Face::NX.neighbors()[0b00].1);
-        assert_eq!(Face::PX.neighbors()[0b11].1, -Face::NX.neighbors()[0b11].1);
+        assert_eq!(Face::Px.neighbors()[0b00].1, -Face::Nx.neighbors()[0b10].1);
+        assert_eq!(Face::Px.neighbors()[0b01].1, -Face::Nx.neighbors()[0b01].1);
+        assert_eq!(Face::Px.neighbors()[0b10].1, -Face::Nx.neighbors()[0b00].1);
+        assert_eq!(Face::Px.neighbors()[0b11].1, -Face::Nx.neighbors()[0b11].1);
 
-        assert_eq!(Face::PY.neighbors()[0b00].1, -Face::NY.neighbors()[0b00].1);
-        assert_eq!(Face::PY.neighbors()[0b01].1, -Face::NY.neighbors()[0b11].1);
-        assert_eq!(Face::PY.neighbors()[0b10].1, -Face::NY.neighbors()[0b10].1);
-        assert_eq!(Face::PY.neighbors()[0b11].1, -Face::NY.neighbors()[0b01].1);
+        assert_eq!(Face::Py.neighbors()[0b00].1, -Face::Ny.neighbors()[0b00].1);
+        assert_eq!(Face::Py.neighbors()[0b01].1, -Face::Ny.neighbors()[0b11].1);
+        assert_eq!(Face::Py.neighbors()[0b10].1, -Face::Ny.neighbors()[0b10].1);
+        assert_eq!(Face::Py.neighbors()[0b11].1, -Face::Ny.neighbors()[0b01].1);
 
-        assert_eq!(Face::PZ.neighbors()[0b00].1, -Face::NZ.neighbors()[0b10].1);
-        assert_eq!(Face::PZ.neighbors()[0b01].1, -Face::NZ.neighbors()[0b01].1);
-        assert_eq!(Face::PZ.neighbors()[0b10].1, -Face::NZ.neighbors()[0b00].1);
-        assert_eq!(Face::PZ.neighbors()[0b11].1, -Face::NZ.neighbors()[0b11].1);
+        assert_eq!(Face::Pz.neighbors()[0b00].1, -Face::Nz.neighbors()[0b10].1);
+        assert_eq!(Face::Pz.neighbors()[0b01].1, -Face::Nz.neighbors()[0b01].1);
+        assert_eq!(Face::Pz.neighbors()[0b10].1, -Face::Nz.neighbors()[0b00].1);
+        assert_eq!(Face::Pz.neighbors()[0b11].1, -Face::Nz.neighbors()[0b11].1);
     }
 
     #[test]
@@ -908,13 +908,13 @@ mod test {
             for (edge, &(neighbor, neighbor_edge, parallel)) in Edge::iter().zip(face.neighbors()) {
                 let local = face.basis()
                     * match edge {
-                        Edge::PX | Edge::NX => na::Vector3::y(),
-                        Edge::PY | Edge::NY => na::Vector3::x(),
+                        Edge::Px | Edge::Nx => na::Vector3::y(),
+                        Edge::Py | Edge::Ny => na::Vector3::x(),
                     };
                 let neighbor = neighbor.basis()
                     * match neighbor_edge {
-                        Edge::PX | Edge::NX => na::Vector3::y(),
-                        Edge::PY | Edge::NY => na::Vector3::x(),
+                        Edge::Px | Edge::Nx => na::Vector3::y(),
+                        Edge::Py | Edge::Ny => na::Vector3::x(),
                     };
                 let sign = if parallel { 1.0 } else { -1.0 };
                 assert_eq!(local, sign * neighbor);
@@ -926,27 +926,27 @@ mod test {
     fn face_coord_sanity() {
         assert_eq!(
             Face::coords(&na::Vector3::x()),
-            (Face::PX, na::Point2::new(0.5, 0.5))
+            (Face::Px, na::Point2::new(0.5, 0.5))
         );
         assert_eq!(
             Face::coords(&na::Vector3::y()),
-            (Face::PY, na::Point2::new(0.5, 0.5))
+            (Face::Py, na::Point2::new(0.5, 0.5))
         );
         assert_eq!(
             Face::coords(&na::Vector3::z()),
-            (Face::PZ, na::Point2::new(0.5, 0.5))
+            (Face::Pz, na::Point2::new(0.5, 0.5))
         );
         assert_eq!(
             Face::coords(&-na::Vector3::x()),
-            (Face::NX, na::Point2::new(0.5, 0.5))
+            (Face::Nx, na::Point2::new(0.5, 0.5))
         );
         assert_eq!(
             Face::coords(&-na::Vector3::y()),
-            (Face::NY, na::Point2::new(0.5, 0.5))
+            (Face::Ny, na::Point2::new(0.5, 0.5))
         );
         assert_eq!(
             Face::coords(&-na::Vector3::z()),
-            (Face::NZ, na::Point2::new(0.5, 0.5))
+            (Face::Nz, na::Point2::new(0.5, 0.5))
         );
     }
 
@@ -975,17 +975,17 @@ mod test {
                 Coords {
                     x: 0,
                     y: 0,
-                    face: PX
+                    face: Px
                 },
                 Coords {
                     x: 0,
                     y: 0,
-                    face: PY
+                    face: Py
                 },
                 Coords {
                     x: 0,
                     y: 0,
-                    face: PZ
+                    face: Pz
                 }
             ]
         );
@@ -995,12 +995,12 @@ mod test {
                 Coords {
                     x: 0,
                     y: 0,
-                    face: PX
+                    face: Px
                 },
                 Coords {
                     x: 0,
                     y: 0,
-                    face: PY
+                    face: Py
                 },
             ]
         );
@@ -1039,7 +1039,7 @@ mod test {
         const COORDS: Coords = Coords {
             x: 0,
             y: 0,
-            face: Face::PY,
+            face: Face::Py,
         };
         assert_abs_diff_eq!(COORDS.samples(1, 1).next().unwrap(), na::Vector3::y_axis());
         let corners = COORDS
@@ -1063,12 +1063,12 @@ mod test {
         const LEFT: Coords = Coords {
             x: 0,
             y: 0,
-            face: Face::PZ,
+            face: Face::Pz,
         };
         const RIGHT: Coords = Coords {
             x: 1,
             y: 0,
-            face: Face::PZ,
+            face: Face::Pz,
         };
         let left = LEFT.samples(2, 2).collect::<Vec<_>>();
         let right = RIGHT.samples(2, 2).collect::<Vec<_>>();
@@ -1084,7 +1084,7 @@ mod test {
         const COORDS: Coords = Coords {
             x: 0,
             y: 0,
-            face: Face::PY,
+            face: Face::Py,
         };
         const FACE_RES: u32 = 1;
         const CHUNK_RES: u32 = 17;
