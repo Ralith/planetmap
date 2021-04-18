@@ -13,12 +13,13 @@ use parry3d_f64::{
     mass_properties::MassProperties,
     math::{Isometry, Point, Real, Vector},
     query::{
-        ClosestPoints, Contact, ContactManifold, ContactManifoldsWorkspace, DefaultQueryDispatcher,
-        NonlinearRigidMotion, PersistentQueryDispatcher, PointProjection, PointQuery,
-        QueryDispatcher, Ray, RayCast, RayIntersection, TypedWorkspaceData, Unsupported,
-        WorkspaceData, TOI,
+        visitors::BoundingVolumeIntersectionsVisitor, ClosestPoints, Contact, ContactManifold,
+        ContactManifoldsWorkspace, DefaultQueryDispatcher, NonlinearRigidMotion,
+        PersistentQueryDispatcher, PointProjection, PointQuery, QueryDispatcher, Ray, RayCast,
+        RayIntersection, TypedWorkspaceData, Unsupported, WorkspaceData, TOI,
     },
-    shape::{FeatureId, Shape, ShapeType, Triangle, TypedShape},
+    shape::{FeatureId, Shape, ShapeType, SimdCompositeShape, Triangle, TypedShape},
+    utils::IsometryOpt,
 };
 
 use crate::{
@@ -605,19 +606,45 @@ where
         workspace: &mut Option<ContactManifoldsWorkspace>,
     ) -> Result<(), Unsupported> {
         if let Some(p1) = g1.downcast_ref::<Planet>() {
-            compute_manifolds(pos12, p1, g2, prediction, manifolds, workspace, false);
+            if let Some(composite) = g2.as_composite_shape() {
+                compute_manifolds_vs_composite(
+                    pos12,
+                    &pos12.inverse(),
+                    p1,
+                    composite,
+                    prediction,
+                    manifolds,
+                    workspace,
+                    false,
+                );
+            } else {
+                compute_manifolds(pos12, p1, g2, prediction, manifolds, workspace, false);
+            }
             return Ok(());
         }
         if let Some(p2) = g2.downcast_ref::<Planet>() {
-            compute_manifolds(
-                &pos12.inverse(),
-                p2,
-                g1,
-                prediction,
-                manifolds,
-                workspace,
-                true,
-            );
+            if let Some(composite) = g2.as_composite_shape() {
+                compute_manifolds_vs_composite(
+                    &pos12.inverse(),
+                    pos12,
+                    p2,
+                    composite,
+                    prediction,
+                    manifolds,
+                    workspace,
+                    true,
+                );
+            } else {
+                compute_manifolds(
+                    &pos12.inverse(),
+                    p2,
+                    g1,
+                    prediction,
+                    manifolds,
+                    workspace,
+                    true,
+                );
+            }
             return Ok(());
         }
         Err(Unsupported)
@@ -732,6 +759,139 @@ impl WorkspaceData for Workspace {
 struct TriangleState {
     manifold_index: usize,
     color: bool,
+}
+
+fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
+    pos12: &Isometry<Real>,
+    pos21: &Isometry<Real>,
+    planet: &Planet,
+    other: &dyn SimdCompositeShape,
+    prediction: Real,
+    manifolds: &mut Vec<ContactManifold<ManifoldData, ContactData>>,
+    workspace: &mut Option<ContactManifoldsWorkspace>,
+    flipped: bool,
+) where
+    ManifoldData: Default + Clone,
+    ContactData: Default + Copy,
+{
+    let workspace = workspace
+        .get_or_insert_with(|| ContactManifoldsWorkspace(Box::new(WorkspaceVsComposite::default())))
+        .0
+        .downcast_mut::<WorkspaceVsComposite>()
+        .unwrap();
+    let dispatcher = DefaultQueryDispatcher; // TODO after https://github.com/dimforge/parry/issues/8
+
+    workspace.color ^= true;
+    let color = workspace.color;
+
+    let quadtree = other.quadtree();
+
+    let bounds = quadtree
+        .root_aabb()
+        .bounding_sphere()
+        .transform_by(pos12)
+        .loosened(prediction);
+    let mut old_manifolds = std::mem::replace(manifolds, Vec::new());
+    planet.map_elements_in_local_sphere(&bounds, |&coords, slot, index, triangle| {
+        let tri_aabb = triangle.compute_aabb(pos21).loosened(prediction);
+
+        let mut visit = |&composite_subshape: &u32| {
+            other.map_part_at(
+                composite_subshape,
+                &mut |composite_part_pos, composite_part_shape| {
+                    let key = CompositeKey {
+                        chunk_coords: coords,
+                        triangle: index,
+                        composite_subshape,
+                    };
+                    // TODO: Dedup wrt. convex case
+                    let tri_state = match workspace.state.entry(key) {
+                        hash_map::Entry::Occupied(e) => {
+                            let tri_state = e.into_mut();
+
+                            let manifold = old_manifolds[tri_state.manifold_index].take();
+                            tri_state.manifold_index = manifolds.len();
+                            tri_state.color = color;
+                            manifolds.push(manifold);
+
+                            tri_state
+                        }
+                        hash_map::Entry::Vacant(e) => {
+                            let mut manifold = ContactManifold::new();
+                            let id = planet.feature_id(slot, index) as u32;
+                            if flipped {
+                                manifold.subshape1 = composite_subshape;
+                                manifold.subshape2 = id;
+                                manifold.subshape_pos1 = composite_part_pos.copied();
+                            } else {
+                                manifold.subshape1 = id;
+                                manifold.subshape2 = composite_subshape;
+                                manifold.subshape_pos2 = composite_part_pos.copied();
+                            };
+
+                            let tri_state = TriangleState {
+                                manifold_index: manifolds.len(),
+                                color,
+                            };
+                            manifolds.push(manifold);
+                            e.insert(tri_state)
+                        }
+                    };
+
+                    let manifold = &mut manifolds[tri_state.manifold_index];
+
+                    if flipped {
+                        let _ = dispatcher.contact_manifold_convex_convex(
+                            &composite_part_pos.inv_mul(pos21),
+                            composite_part_shape,
+                            triangle,
+                            prediction,
+                            manifold,
+                        );
+                    } else {
+                        let _ = dispatcher.contact_manifold_convex_convex(
+                            &composite_part_pos.prepend_to(pos12),
+                            triangle,
+                            composite_part_shape,
+                            prediction,
+                            manifold,
+                        );
+                    }
+                },
+            );
+            true
+        };
+        let mut visitor = BoundingVolumeIntersectionsVisitor::new(&tri_aabb, &mut visit);
+        quadtree.traverse_depth_first(&mut visitor);
+
+        true
+    });
+
+    workspace.state.retain(|_, x| x.color == color);
+}
+
+/// Narrow-phase collision detection state for `Planet`
+#[derive(Default, Clone)]
+pub struct WorkspaceVsComposite {
+    state: HashMap<CompositeKey, TriangleState>,
+    color: bool,
+}
+
+#[derive(Eq, PartialEq, Hash, Copy, Clone)]
+struct CompositeKey {
+    chunk_coords: Coords,
+    triangle: u32,
+    composite_subshape: u32,
+}
+
+impl WorkspaceData for WorkspaceVsComposite {
+    fn as_typed_workspace_data(&self) -> TypedWorkspaceData {
+        TypedWorkspaceData::Custom(0)
+    }
+
+    fn clone_dyn(&self) -> Box<dyn WorkspaceData> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]
