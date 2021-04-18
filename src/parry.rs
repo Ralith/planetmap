@@ -675,7 +675,6 @@ fn compute_manifolds<ManifoldData, ContactData>(
             hash_map::Entry::Vacant(e) => {
                 let tri_state = TriangleState {
                     manifold_index: manifolds.len(),
-                    workspace: None,
                     color,
                 };
 
@@ -732,7 +731,6 @@ impl WorkspaceData for Workspace {
 #[derive(Clone)]
 struct TriangleState {
     manifold_index: usize,
-    workspace: Option<ContactManifoldsWorkspace>,
     color: bool,
 }
 
