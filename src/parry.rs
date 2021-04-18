@@ -577,12 +577,15 @@ fn compute_toi(
         } else {
             dispatcher.time_of_impact(pos12, vel12, triangle, other, max_toi)
         };
-        if let Ok(Some(impact)) = impact {
-            closest = Some(match closest {
-                None => impact,
-                Some(x) if impact.toi < x.toi => impact,
-                Some(x) => x,
-            });
+        if let Ok(Some(mut impact)) = impact {
+            if closest.map_or(false, |x| x.toi < impact.toi) {
+                // Another contact is closer
+                return true;
+            }
+            // Sanitize normal to avoid harsh edge collisions
+            impact.normal1 = triangle.normal().unwrap();
+            impact.normal2 = pos12.inverse_transform_unit_vector(&impact.normal1);
+            closest = Some(impact);
         }
         true
     });
