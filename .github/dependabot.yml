@@ -1,0 +1,14 @@
+version: 2
+updates:
+- package-ecosystem: cargo
+  directory: "/"
+  schedule:
+    interval: daily
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: ncollide3d
+    versions:
+    - 0.28.0
+  - dependency-name: nphysics3d
+    versions:
+    - 0.20.0
