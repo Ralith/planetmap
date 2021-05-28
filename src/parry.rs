@@ -527,14 +527,38 @@ impl QueryDispatcher for PlanetDispatcher {
 
     fn nonlinear_time_of_impact(
         &self,
-        _motion1: &NonlinearRigidMotion,
-        _g1: &dyn Shape,
-        _motion2: &NonlinearRigidMotion,
-        _g2: &dyn Shape,
-        _start_time: Real,
-        _end_time: Real,
-        _stop_at_penetration: bool,
+        motion1: &NonlinearRigidMotion,
+        g1: &dyn Shape,
+        motion2: &NonlinearRigidMotion,
+        g2: &dyn Shape,
+        start_time: Real,
+        end_time: Real,
+        stop_at_penetration: bool,
     ) -> Result<Option<TOI>, Unsupported> {
+        if let Some(p1) = g1.downcast_ref::<Planet>() {
+            return Ok(compute_nonlinear_toi(
+                motion1,
+                p1,
+                motion2,
+                g2,
+                start_time,
+                end_time,
+                stop_at_penetration,
+                false,
+            ));
+        }
+        if let Some(p2) = g2.downcast_ref::<Planet>() {
+            return Ok(compute_nonlinear_toi(
+                motion2,
+                p2,
+                motion1,
+                g1,
+                start_time,
+                end_time,
+                stop_at_penetration,
+                false,
+            ));
+        }
         Err(Unsupported)
     }
 }
@@ -577,6 +601,63 @@ fn compute_toi(
             dispatcher.time_of_impact(&pos12.inverse(), &-vel12, other, triangle, max_toi)
         } else {
             dispatcher.time_of_impact(pos12, vel12, triangle, other, max_toi)
+        };
+        if let Ok(Some(impact)) = impact {
+            closest = Some(match closest {
+                None => impact,
+                Some(x) if impact.toi < x.toi => impact,
+                Some(x) => x,
+            });
+        }
+        true
+    });
+    closest
+}
+
+fn compute_nonlinear_toi(
+    motion_planet: &NonlinearRigidMotion,
+    planet: &Planet,
+    motion_other: &NonlinearRigidMotion,
+    other: &dyn Shape,
+    start_time: Real,
+    end_time: Real,
+    stop_at_penetration: bool,
+    flipped: bool,
+) -> Option<TOI> {
+    // TODO after https://github.com/dimforge/parry/issues/8
+    let dispatcher = DefaultQueryDispatcher;
+    // TODO: Select chunks/triangles more conservatively, as discussed in compute_toi
+    let bounds = {
+        let start_pos = motion_planet.position_at_time(start_time).inverse()
+            * motion_other.position_at_time(start_time);
+        let end_pos = motion_planet.position_at_time(end_time).inverse()
+            * motion_other.position_at_time(end_time);
+        let start = other.compute_aabb(&start_pos);
+        let end = other.compute_aabb(&end_pos);
+        start.merged(&end).bounding_sphere()
+    };
+    let mut closest = None::<TOI>;
+    planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
+        let impact = if flipped {
+            dispatcher.nonlinear_time_of_impact(
+                motion_other,
+                other,
+                motion_planet,
+                triangle,
+                start_time,
+                end_time,
+                stop_at_penetration,
+            )
+        } else {
+            dispatcher.nonlinear_time_of_impact(
+                motion_planet,
+                triangle,
+                motion_other,
+                other,
+                start_time,
+                end_time,
+                stop_at_penetration,
+            )
         };
         if let Ok(Some(impact)) = impact {
             closest = Some(match closest {
@@ -1134,5 +1215,60 @@ mod tests {
                 &ball,
             )
             .unwrap());
+    }
+
+    #[test]
+    fn nonlinear_toi_smoke() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        let ball = Ball { radius: 1.0 };
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            32,
+            PLANET_RADIUS,
+            17,
+        );
+
+        let toi = PlanetDispatcher
+            .nonlinear_time_of_impact(
+                &NonlinearRigidMotion::constant_position(na::one()),
+                &planet,
+                &NonlinearRigidMotion {
+                    start: Isometry::translation(PLANET_RADIUS + ball.radius + 0.5, 0.0, 0.0),
+                    local_center: na::Point3::origin(),
+                    linvel: -na::Vector3::x(),
+                    angvel: na::zero(),
+                },
+                &ball,
+                0.0,
+                1.0,
+                true,
+            )
+            .unwrap()
+            .expect("no hit");
+        assert_eq!(toi.status, TOIStatus::Converged);
+        assert_relative_eq!(toi.toi, 0.5);
+        assert_relative_eq!(toi.witness1, na::Point3::new(PLANET_RADIUS, 0.0, 0.0));
+        assert_relative_eq!(toi.witness2, na::Point3::new(-ball.radius, 0.0, 0.0));
+        assert_relative_eq!(toi.normal1, na::Vector3::x_axis());
+        assert_relative_eq!(toi.normal2, -na::Vector3::x_axis());
+
+        // Same configuration as above, but too far to hit within the allotted time
+        let toi = PlanetDispatcher
+            .nonlinear_time_of_impact(
+                &NonlinearRigidMotion::constant_position(na::one()),
+                &planet,
+                &NonlinearRigidMotion {
+                    start: Isometry::translation(PLANET_RADIUS + ball.radius + 1.5, 0.0, 0.0),
+                    local_center: na::Point3::origin(),
+                    linvel: -na::Vector3::x(),
+                    angvel: na::zero(),
+                },
+                &ball,
+                0.0,
+                1.0,
+                true,
+            )
+            .unwrap();
+        assert!(toi.is_none());
     }
 }
