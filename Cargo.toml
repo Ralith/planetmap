@@ -22,7 +22,7 @@ parry3d-f64 = { version = "0.4", optional = true }
 
 [dev-dependencies]
 criterion = "0.3.2"
-approx = "0.4"
+approx = "0.5"
 
 [[bench]]
 name = "bench"
