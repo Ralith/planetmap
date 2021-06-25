@@ -33,6 +33,17 @@ impl Chunk {
         }
     }
 
+    /// Select all `Chunk`s of a certain depth intersecting a cone opening towards `direction` with
+    /// half-angle `theta`
+    pub fn neighborhood(
+        depth: u8,
+        direction: na::Vector3<f32>,
+        theta: f32,
+    ) -> impl Iterator<Item = Self> {
+        Coords::neighborhood(2u32.pow(depth.into()), direction, theta)
+            .map(move |coords| Self { coords, depth })
+    }
+
     /// The smallest chunk that contains this chunk
     pub fn parent(&self) -> Option<Self> {
         let depth = self.depth.checked_sub(1)?;
