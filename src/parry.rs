@@ -587,9 +587,7 @@ fn compute_toi(
 ) -> Option<TOI> {
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
-    // TODO: To improve perf with large max_toi, select chunks similarly to ray casts, maybe using
-    // ray-sphere from hit point vs. ray through chunk vertex to detect secondary hits, from which
-    // no recursive traversal proceeds?
+    // TODO: Raycast vs. minkowski sum of chunk bounds and bounding sphere?
     let bounds = {
         let start = other.compute_aabb(pos12);
         let end = start.transform_by(&Isometry::from_parts((max_toi * vel12).into(), na::one()));
