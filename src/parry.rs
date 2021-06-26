@@ -761,8 +761,8 @@ fn compute_manifolds<ManifoldData, ContactData>(
         .unwrap();
     let dispatcher = DefaultQueryDispatcher; // TODO after https://github.com/dimforge/parry/issues/8
 
-    workspace.color ^= true;
-    let color = workspace.color;
+    workspace.phase ^= true;
+    let phase = workspace.phase;
 
     let bounds = other.compute_bounding_sphere(pos12).loosened(prediction);
     let mut old_manifolds = std::mem::replace(manifolds, Vec::new());
@@ -773,7 +773,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
 
                 let manifold = old_manifolds[tri_state.manifold_index].take();
                 tri_state.manifold_index = manifolds.len();
-                tri_state.color = color;
+                tri_state.phase = phase;
                 manifolds.push(manifold);
 
                 tri_state
@@ -781,7 +781,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
             hash_map::Entry::Vacant(e) => {
                 let tri_state = TriangleState {
                     manifold_index: manifolds.len(),
-                    color,
+                    phase,
                 };
 
                 let id = planet.feature_id(slot, index) as u32;
@@ -814,14 +814,14 @@ fn compute_manifolds<ManifoldData, ContactData>(
         true
     });
 
-    workspace.state.retain(|_, x| x.color == color);
+    workspace.state.retain(|_, x| x.phase == phase);
 }
 
 /// Narrow-phase collision detection state for `Planet`
 #[derive(Default, Clone)]
 pub struct Workspace {
     state: HashMap<(Coords, u32), TriangleState>,
-    color: bool,
+    phase: bool,
 }
 
 impl WorkspaceData for Workspace {
@@ -837,7 +837,7 @@ impl WorkspaceData for Workspace {
 #[derive(Clone)]
 struct TriangleState {
     manifold_index: usize,
-    color: bool,
+    phase: bool,
 }
 
 fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
@@ -860,8 +860,8 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
         .unwrap();
     let dispatcher = DefaultQueryDispatcher; // TODO after https://github.com/dimforge/parry/issues/8
 
-    workspace.color ^= true;
-    let color = workspace.color;
+    workspace.phase ^= true;
+    let phase = workspace.phase;
 
     let quadtree = other.quadtree();
 
@@ -890,7 +890,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
 
                             let manifold = old_manifolds[tri_state.manifold_index].take();
                             tri_state.manifold_index = manifolds.len();
-                            tri_state.color = color;
+                            tri_state.phase = phase;
                             manifolds.push(manifold);
 
                             tri_state
@@ -910,7 +910,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
 
                             let tri_state = TriangleState {
                                 manifold_index: manifolds.len(),
-                                color,
+                                phase,
                             };
                             manifolds.push(manifold);
                             e.insert(tri_state)
@@ -946,14 +946,14 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
         true
     });
 
-    workspace.state.retain(|_, x| x.color == color);
+    workspace.state.retain(|_, x| x.phase == phase);
 }
 
 /// Narrow-phase collision detection state for `Planet`
 #[derive(Default, Clone)]
 pub struct WorkspaceVsComposite {
     state: HashMap<CompositeKey, TriangleState>,
-    color: bool,
+    phase: bool,
 }
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone)]
