@@ -132,7 +132,7 @@ impl Planet {
         let dir = bounds.center().coords;
         let distance = dir.norm();
         let cache = &mut *self.cache.lock().unwrap();
-        for coords in Coords::neighborhood(
+        'outer: for coords in Coords::neighborhood(
             self.terrain.face_resolution(),
             na::convert(dir),
             bounds.radius().atan2(distance) as f32,
@@ -151,7 +151,7 @@ impl Planet {
                 })
             {
                 if !f(&coords, slot, i as u32, &triangle) {
-                    break;
+                    break 'outer;
                 }
             }
         }
