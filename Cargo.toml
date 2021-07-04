@@ -14,15 +14,15 @@ simd = ["simdeez"]
 parry = ["parry3d-f64"]
 
 [dependencies]
-na = { package = "nalgebra", version = "0.26.1" }
+na = { package = "nalgebra", version = "0.27.1" }
 slab = "0.4.2"
 hashbrown = "0.11"
 simdeez = { version = "1.0", optional = true }
-parry3d-f64 = { version = "0.4", optional = true }
+parry3d-f64 = { version = "0.5.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.3.2"
-approx = "0.4"
+approx = "0.5"
 
 [[bench]]
 name = "bench"
