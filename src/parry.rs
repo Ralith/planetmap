@@ -863,9 +863,9 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     workspace.phase ^= true;
     let phase = workspace.phase;
 
-    let quadtree = other.quadtree();
+    let bvh = other.qbvh();
 
-    let bounds = quadtree
+    let bounds = bvh
         .root_aabb()
         .bounding_sphere()
         .transform_by(pos12)
@@ -941,7 +941,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
             true
         };
         let mut visitor = BoundingVolumeIntersectionsVisitor::new(&tri_aabb, &mut visit);
-        quadtree.traverse_depth_first(&mut visitor);
+        bvh.traverse_depth_first(&mut visitor);
 
         true
     });
