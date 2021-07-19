@@ -156,6 +156,27 @@ impl Planet {
             }
         }
     }
+
+    fn triangle(&self, coords: &Coords, samples: &[f32], x: u32, y: u32, left: bool) -> Triangle {
+        let quad_resolution = (self.chunk_resolution - 1) as f64;
+        let vertex = |x, y| {
+            let height = samples[(y * self.chunk_resolution + x) as usize];
+            let unit_coords =
+                na::Point2::new(x as f64 / quad_resolution, y as f64 / quad_resolution);
+            let dir = coords.direction(self.terrain.face_resolution(), &unit_coords);
+            na::Point3::from(dir.into_inner() * (self.radius as f64 + height as f64))
+        };
+
+        let p0 = vertex(x, y);
+        let p1 = vertex(x + 1, y);
+        let p2 = vertex(x + 1, y + 1);
+        let p3 = vertex(x, y + 1);
+        if left {
+            Triangle::new(p0, p1, p2)
+        } else {
+            Triangle::new(p2, p3, p0)
+        }
+    }
 }
 
 impl Clone for Planet {
@@ -340,32 +361,13 @@ impl<'a> ChunkTriangles<'a> {
         }
     }
 
-    fn vertex(&self, x: u32, y: u32) -> Point<Real> {
-        let height = self.samples[(y * self.planet.chunk_resolution + x) as usize];
-        let quad_resolution = (self.planet.chunk_resolution - 1) as f64;
-        let unit_coords = na::Point2::new(x as f64 / quad_resolution, y as f64 / quad_resolution);
-        let dir = self
-            .coords
-            .direction(self.planet.terrain.face_resolution(), &unit_coords);
-        na::Point3::from(dir.into_inner() * (self.planet.radius as f64 + height as f64))
-    }
-
     fn get(&self) -> Triangle {
-        let quad_resolution = self.planet.chunk_resolution - 1;
-
         let quad_index = self.index >> 1;
+        let quad_resolution = self.planet.chunk_resolution - 1;
         let y = quad_index / quad_resolution;
         let x = quad_index % quad_resolution;
-        let p0 = self.vertex(x, y);
-        let p1 = self.vertex(x + 1, y);
-        let p2 = self.vertex(x + 1, y + 1);
-        let p3 = self.vertex(x, y + 1);
         let left = (self.index & 1) == 0;
-        if left {
-            Triangle::new(p0, p1, p2)
-        } else {
-            Triangle::new(p2, p3, p0)
-        }
+        self.planet.triangle(&self.coords, self.samples, x, y, left)
     }
 }
 
