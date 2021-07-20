@@ -205,29 +205,34 @@ impl RayCast for Planet {
         max_toi: Real,
         solid: bool,
     ) -> Option<RayIntersection> {
-        // Find the chunk containing the ray origin
-        let res = self.terrain.face_resolution();
+        let quad_resolution = self.chunk_resolution - 1;
+        // Find the quad containing the ray origin
+        let res = self.terrain.face_resolution() * quad_resolution;
         let mut coords = Coords::from_vector(res, &ray.origin.coords.cast());
 
         // Walk along the ray until we hit something
         let cache = &mut *self.cache.lock().unwrap();
         loop {
-            let (slot, data) = cache.get(self, &coords);
-            // FIXME: Rays can sometimes slip between the bounding planes of a chunk and the outer
-            // edge of the triangles within. To avoid this, we should extend boundary triangles to
-            // form a narrow skirt around the chunk, or check neighboring chunks when very close to
-            // a boundary.
+            let chunk_coords = Coords {
+                x: coords.x / quad_resolution,
+                y: coords.y / quad_resolution,
+                face: coords.face,
+            };
+            let (slot, data) = cache.get(self, &chunk_coords);
+            // FIXME: Rays can sometimes slip between bounding planes and the outer edge of a
+            // quad. To avoid this, we should extend the quad to form a narrow skirt around the
+            // chunk, or check neighboring chunks when very close to a boundary.
 
-            // TODO: We could probably improve perf here by replacing the exhaustive ChunkTriangles
-            // scan with something that just walks along the path of the ray, similar to how chunks
-            // are traversed. Maybe even the same code?
-            if let Some((index, mut hit)) = ChunkTriangles::new(self, coords, &data.samples)
-                .filter_map(|tri| tri.cast_local_ray_and_get_normal(ray, max_toi, solid))
-                .enumerate()
-                .min_by(|(_, x), (_, y)| x.toi.partial_cmp(&y.toi).unwrap())
-            {
-                hit.feature = FeatureId::Face(self.feature_id(slot, index as u32));
-                return Some(hit);
+            let quad = na::Point2::new(coords.x % quad_resolution, coords.y % quad_resolution);
+            for tri in 0..2 {
+                let triangle =
+                    self.triangle(&chunk_coords, &data.samples, quad.x, quad.y, tri != 0);
+                if let Some(mut hit) = triangle.cast_local_ray_and_get_normal(ray, max_toi, solid) {
+                    let quad_index = quad.y * self.chunk_resolution + quad.x;
+                    let index = (quad_index << 1) | tri;
+                    hit.feature = FeatureId::Face(self.feature_id(slot, index as u32));
+                    return Some(hit);
+                }
             }
 
             match raycast_edges(res, &coords, ray, max_toi) {
