@@ -293,6 +293,7 @@ impl PointQuery for Planet {
                 point: *pt,
             };
         }
+        // TODO: Handle `solid` near the surface
         self.project_local_point_and_get_feature(pt).0
     }
 
@@ -300,6 +301,9 @@ impl PointQuery for Planet {
         &self,
         pt: &Point<Real>,
     ) -> (PointProjection, FeatureId) {
+        // TODO: Optimize/fix this by projecting `pt` onto the cubemap, then scanning *outward* from
+        // the quad containing the projected point until all remaining triangles must be further
+        // than the closest triangle found so far, regardless of height
         let coords = Coords::from_vector(self.terrain.face_resolution(), &na::convert(pt.coords));
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, pt);
         let cache = &mut *self.cache.lock().unwrap();
