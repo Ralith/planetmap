@@ -129,28 +129,37 @@ impl Planet {
         bounds: &BoundingSphere,
         mut f: impl FnMut(&Coords, SlotId, u32, &Triangle) -> bool,
     ) {
+        let quad_resolution = self.chunk_resolution - 1;
         let dir = bounds.center().coords;
         let distance = dir.norm();
         let cache = &mut *self.cache.lock().unwrap();
-        'outer: for coords in Coords::neighborhood(
-            self.terrain.face_resolution(),
+        // Iterate over each nearby quad
+        'outer: for quad_coords in Coords::neighborhood(
+            self.terrain.face_resolution() * quad_resolution,
             na::convert(dir),
             bounds.radius().atan2(distance) as f32,
         ) {
-            let (slot, data) = cache.get(self, &coords);
+            // Coordinates of the chunk containing the quad
+            let chunk_coords = Coords {
+                x: quad_coords.x / quad_resolution,
+                y: quad_coords.y / quad_resolution,
+                face: quad_coords.face,
+            };
+            let (slot, data) = cache.get(self, &chunk_coords);
             if self.radius as f64 + data.max as f64 + bounds.radius() < distance {
                 // Short-circuit if `other` is way above this chunk
                 continue;
             }
-            // Future work: should be able to filter triangles before actually computing them
-            for (i, triangle) in ChunkTriangles::new(self, coords, &data.samples)
-                .enumerate()
-                .filter(|(_, tri)| {
-                    tri.bounding_sphere(&Isometry::identity())
-                        .intersects(&bounds)
-                })
-            {
-                if !f(&coords, slot, i as u32, &triangle) {
+            let quad = na::Point2::new(
+                quad_coords.x % quad_resolution,
+                quad_coords.y % quad_resolution,
+            );
+            let quad_index = quad.y * self.chunk_resolution + quad.x;
+            for tri in 0..2 {
+                let index = (quad_index << 1) | tri;
+                let triangle =
+                    self.triangle(&chunk_coords, &data.samples, quad.x, quad.y, tri != 0);
+                if !f(&chunk_coords, slot, index, &triangle) {
                     break 'outer;
                 }
             }
