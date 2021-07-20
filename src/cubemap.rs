@@ -535,23 +535,37 @@ impl Coords {
                     .dot(&direction)
                     .is_sign_positive()
             })
-            .map(move |face| {
+            .filter_map(move |face| {
+                use std::f32::consts::FRAC_PI_4;
                 let local = face.basis().inverse_transform_vector(&direction);
                 let local = local.xy() / local.z;
                 // atan(x / 1) = angle of `local` around Y axis through cube origin ("midpoint x")
                 let theta_m_x = local.x.atan();
                 // tan(θ_mx - θ) * 1 = coordinate of the intersection of the X lower bound with the cube
-                let x_lower = (theta_m_x - theta).tan();
+                let x_lower = theta_m_x - theta;
+                if x_lower > FRAC_PI_4 {
+                    return None;
+                }
                 // tan(θ_mx + θ) * 1 = coordinate of the intersection of the X upper bound with the cube
-                let x_upper = (theta_m_x + theta).tan();
+                let x_upper = theta_m_x + theta;
+                if x_upper < -FRAC_PI_4 {
+                    return None;
+                }
                 // once more, perpendicular!
                 let theta_m_y = local.y.atan();
-                let y_lower = (theta_m_y - theta).tan();
-                let y_upper = (theta_m_y + theta).tan();
-                (face, (x_lower, y_lower), (x_upper, y_upper))
-            })
-            .filter(|(_, lower, upper)| {
-                lower.0 <= 1.0 && lower.1 <= 1.0 && upper.0 >= -1.0 && upper.1 >= -1.0
+                let y_lower = theta_m_y - theta;
+                if y_lower > FRAC_PI_4 {
+                    return None;
+                }
+                let y_upper = theta_m_y + theta;
+                if y_upper < -FRAC_PI_4 {
+                    return None;
+                }
+                Some((
+                    face,
+                    (x_lower.tan(), y_lower.tan()),
+                    (x_upper.tan(), y_upper.tan()),
+                ))
             })
             .flat_map(move |(face, lower, upper)| {
                 let (x_lower, y_lower) = discretize(
