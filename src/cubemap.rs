@@ -356,7 +356,7 @@ impl Neg for Face {
 
 impl Face {
     /// Find the face that intersects a vector originating at the center of a cube
-    pub fn from_vector<N: RealField + PartialOrd>(x: &na::Vector3<N>) -> Self {
+    pub fn from_vector<N: RealField + PartialOrd + Copy>(x: &na::Vector3<N>) -> Self {
         let (&value, &axis) = x
             .iter()
             .zip(&[Face::Px, Face::Py, Face::Pz])
@@ -370,7 +370,7 @@ impl Face {
     }
 
     /// Compute which `Face` a vector intersects, and where the intersection lies
-    pub fn coords<N: RealField>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
+    pub fn coords<N: RealField + Copy>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
         let face = Self::from_vector(x);
         let wrt_face = face.basis().inverse_transform_vector(x);
         (
@@ -448,7 +448,10 @@ impl Face {
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this face
-    pub fn direction<N: RealField>(self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: RealField + Copy>(
+        self,
+        coords: &na::Point2<N>,
+    ) -> na::Unit<na::Vector3<N>> {
         let dir_z = na::Unit::new_normalize(na::Vector3::new(coords.x, coords.y, N::one()));
         self.basis() * dir_z
     }
@@ -587,7 +590,7 @@ impl Coords {
     }
 
     /// The approximate direction represented by these coordinates
-    pub fn center<N: RealField>(&self, resolution: u32) -> na::Unit<na::Vector3<N>> {
+    pub fn center<N: RealField + Copy>(&self, resolution: u32) -> na::Unit<na::Vector3<N>> {
         let texcoord = if resolution == 1 {
             na::Point2::new(0.5, 0.5)
         } else {
@@ -599,7 +602,7 @@ impl Coords {
 
     /// Compute the direction identified by a point in the [0..1]^2 area covered by these
     /// coordinates
-    pub fn direction<N: RealField>(
+    pub fn direction<N: RealField + Copy>(
         &self,
         resolution: u32,
         coords: &na::Point2<N>,

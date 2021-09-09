@@ -123,7 +123,7 @@ impl Chunk {
     /// Location of the center of this chunk on the surface of the sphere
     ///
     /// Transform by face.basis() to get world origin
-    pub fn origin_on_face<N: RealField>(&self) -> na::Unit<na::Vector3<N>> {
+    pub fn origin_on_face<N: RealField + Copy>(&self) -> na::Unit<na::Vector3<N>> {
         let size = self.edge_length::<N>();
         let vec = na::Vector3::new(
             (na::convert::<_, N>(self.coords.x as f64) + na::convert::<_, N>(0.5)) * size
@@ -150,7 +150,10 @@ impl Chunk {
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this chunk
-    pub fn direction<N: RealField>(&self, coords: &na::Point2<N>) -> na::Unit<na::Vector3<N>> {
+    pub fn direction<N: RealField + Copy>(
+        &self,
+        coords: &na::Point2<N>,
+    ) -> na::Unit<na::Vector3<N>> {
         self.coords.direction(self.resolution(), coords)
     }
 
