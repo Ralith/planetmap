@@ -114,7 +114,7 @@ impl Planet {
             vec![0.0; self.chunk_resolution as usize * self.chunk_resolution as usize]
                 .into_boxed_slice();
         self.terrain
-            .sample(self.chunk_resolution, &coords, &mut samples[..]);
+            .sample(self.chunk_resolution, coords, &mut samples[..]);
         samples
     }
 
@@ -430,7 +430,7 @@ impl Cache {
                 };
                 let slot = self
                     .slots
-                    .insert(ChunkData::new(*coords, planet.sample(&coords)));
+                    .insert(ChunkData::new(*coords, planet.sample(coords)));
                 e.insert(slot);
                 (slot, old)
             }
@@ -632,6 +632,7 @@ fn compute_toi(
     closest
 }
 
+#[allow(clippy::too_many_arguments)] // that's just what it takes
 fn compute_nonlinear_toi(
     motion_planet: &NonlinearRigidMotion,
     planet: &Planet,
@@ -785,7 +786,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
     let phase = workspace.phase;
 
     let bounds = other.compute_bounding_sphere(pos12).loosened(prediction);
-    let mut old_manifolds = std::mem::replace(manifolds, Vec::new());
+    let mut old_manifolds = std::mem::take(manifolds);
     planet.map_elements_in_local_sphere(&bounds, |&coords, slot, index, triangle| {
         let tri_state = match workspace.state.entry((coords, index)) {
             hash_map::Entry::Occupied(e) => {
@@ -860,6 +861,7 @@ struct TriangleState {
     phase: bool,
 }
 
+#[allow(clippy::too_many_arguments)] // that's just what it takes
 fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     pos12: &Isometry<Real>,
     pos21: &Isometry<Real>,
@@ -890,7 +892,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
         .bounding_sphere()
         .transform_by(pos12)
         .loosened(prediction);
-    let mut old_manifolds = std::mem::replace(manifolds, Vec::new());
+    let mut old_manifolds = std::mem::take(manifolds);
     planet.map_elements_in_local_sphere(&bounds, |&coords, slot, index, triangle| {
         let tri_aabb = triangle.compute_aabb(pos21).loosened(prediction);
 

@@ -45,7 +45,7 @@ impl Config {
 
     fn slots_needed_inner(&self, chunk: &Chunk) -> usize {
         let viewpoint = na::Point3::from(na::Vector3::new(1.0, 1.0, 1.0).normalize());
-        if chunk.depth == self.max_depth || !needs_subdivision(&chunk, &viewpoint) {
+        if chunk.depth == self.max_depth || !needs_subdivision(chunk, &viewpoint) {
             return 1;
         }
         chunk
