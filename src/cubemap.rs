@@ -892,7 +892,7 @@ mod test {
             -na::Vector3::z_axis(),
             na::Unit::new_normalize(na::Vector3::new(1.0, 1.0, 1.0)),
         ] {
-            let index = index(RES, &dir);
+            let index = index(RES, dir);
             let out = get_dir(RES, index).unwrap();
             assert_eq!(dir, &out);
         }
