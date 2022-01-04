@@ -146,8 +146,10 @@ impl Planet {
                 face: quad_coords.face,
             };
             let (slot, data) = cache.get(self, &chunk_coords);
-            if self.radius as f64 + data.max as f64 + bounds.radius() < distance {
-                // Short-circuit if `other` is way above this chunk
+            if self.radius as f64 + data.max as f64 + bounds.radius() < distance
+                || self.radius as f64 + data.min as f64 - bounds.radius() > distance
+            {
+                // Short-circuit if `other` is way above or below this chunk
                 continue;
             }
             let quad = na::Point2::new(
