@@ -16,7 +16,7 @@ parry = ["parry3d-f64"]
 [dependencies]
 na = { package = "nalgebra", version = "0.30" }
 slab = "0.4.2"
-hashbrown = "0.11"
+hashbrown = "0.12"
 simdeez = { version = "1.0", optional = true }
 parry3d-f64 = { version = "0.8.0", optional = true }
 
