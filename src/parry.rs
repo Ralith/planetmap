@@ -136,7 +136,7 @@ impl Planet {
         // Iterate over each nearby quad
         'outer: for quad_coords in Coords::neighborhood(
             self.terrain.face_resolution() * quad_resolution,
-            na::convert(dir),
+            dir.cast(),
             bounds.radius().atan2(distance) as f32,
         ) {
             // Coordinates of the chunk containing the quad
@@ -306,7 +306,7 @@ impl PointQuery for Planet {
         // TODO: Optimize/fix this by projecting `pt` onto the cubemap, then scanning *outward* from
         // the quad containing the projected point until all remaining triangles must be further
         // than the closest triangle found so far, regardless of height
-        let coords = Coords::from_vector(self.terrain.face_resolution(), &na::convert(pt.coords));
+        let coords = Coords::from_vector(self.terrain.face_resolution(), &pt.coords.cast());
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, pt);
         let cache = &mut *self.cache.lock().unwrap();
         let (slot, data) = cache.get(self, &coords);

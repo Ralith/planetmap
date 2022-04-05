@@ -376,7 +376,7 @@ impl Face {
         (
             face,
             na::Point2::from(wrt_face.xy() * (na::convert::<_, N>(0.5) / wrt_face.z))
-                + na::convert::<_, na::Vector2<N>>(na::Vector2::new(0.5, 0.5)),
+                + na::Vector2::new(0.5, 0.5).cast(),
         )
     }
 
@@ -597,7 +597,7 @@ impl Coords {
             na::Point2::new(self.x as f64, self.y as f64) / ((resolution - 1) as f64)
         };
         let on_z = texcoord * 2.0 - na::Vector2::new(1.0, 1.0);
-        self.face.direction(&na::convert::<_, na::Point2<N>>(on_z))
+        self.face.direction(&on_z.cast())
     }
 
     /// Compute the direction identified by a point in the [0..1]^2 area covered by these
@@ -608,10 +608,9 @@ impl Coords {
         coords: &na::Point2<N>,
     ) -> na::Unit<na::Vector3<N>> {
         let edge_length = Self::edge_length::<N>(resolution);
-        let origin_on_face = na::Point2::from(
-            na::convert::<_, na::Vector2<N>>(na::Vector2::new(self.x as f64, self.y as f64))
-                * edge_length,
-        ) - na::convert::<_, na::Vector2<N>>(na::Vector2::new(1.0, 1.0));
+        let origin_on_face =
+            na::Point2::from(na::Vector2::new(self.x as f64, self.y as f64).cast() * edge_length)
+                - na::Vector2::new(1.0, 1.0).cast();
         let pos_on_face = origin_on_face + coords.coords * edge_length;
         self.face.direction(&pos_on_face)
     }
