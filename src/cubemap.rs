@@ -447,7 +447,7 @@ impl Face {
         }
     }
 
-    /// Compute the direction identified by a [0..1]^2 vector on this face
+    /// Compute the direction identified by a [-1..1]^2 vector on this face
     pub fn direction<N: RealField + Copy>(
         self,
         coords: &na::Point2<N>,
