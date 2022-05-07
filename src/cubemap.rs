@@ -391,13 +391,12 @@ impl Face {
             Pz => (na::Vector3::x(), na::Vector3::y(), na::Vector3::z()),
             Nz => (-na::Vector3::x(), na::Vector3::y(), -na::Vector3::z()),
         };
-        na::Rotation3::from_matrix_unchecked(na::Matrix3::from_columns(&[x, y, z]))
+        na::Rotation3::from_basis_unchecked(&[x, y, z])
     }
 
     /// Iterator over all `Face`s
     pub fn iter() -> impl Iterator<Item = Face> {
-        const VALUES: &[Face] = &[Face::Px, Face::Nx, Face::Py, Face::Ny, Face::Pz, Face::Nz];
-        VALUES.iter().cloned()
+        [Face::Px, Face::Nx, Face::Py, Face::Ny, Face::Pz, Face::Nz].into_iter()
     }
 
     /// Neighboring faces wrt. local axes [-x, -y, +x, +y].
@@ -673,7 +672,7 @@ pub enum Edge {
 impl Edge {
     /// Iterator over all `Edge`s
     pub fn iter() -> impl Iterator<Item = Edge> {
-        [Edge::Nx, Edge::Ny, Edge::Px, Edge::Py].iter().cloned()
+        [Edge::Nx, Edge::Ny, Edge::Px, Edge::Py].into_iter()
     }
 }
 
