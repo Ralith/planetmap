@@ -27,4 +27,3 @@ approx = "0.5"
 [[bench]]
 name = "bench"
 harness = false
-required-features = ["parry"]

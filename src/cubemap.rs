@@ -8,12 +8,14 @@ use na::RealField;
 #[cfg(feature = "simd")]
 use simdeez::Simd;
 
-/// A dense, fixed-resolution cube map
+/// A dense, fixed-resolution, warped cube map
 ///
 /// Useful for storing and manipulating moderate-resolution samplings of radial functions such as
-/// spherical heightmaps.
+/// spherical heightmaps. Warped to improve spacing of slots compared to a naive cube map, based on
+/// the 5th order polynomial method described in "Cube-to-sphere Projections for Procedural
+/// Texturing and Beyond" (Zucker, Higashi).
 ///
-/// For addressing purposes, texels along the edges and at the corners of a face do *not* overlap
+/// For addressing purposes, slots along the edges and at the corners of a face do *not* overlap
 /// with their neighbors. Note that `Coords::samples` nonetheless *does* produce samples that will
 /// overlap along the edges of neighboring `Coords`.
 #[derive(Debug)]
@@ -204,7 +206,8 @@ impl<'a, T> IndexMut<&'a na::Vector3<f32>> for CubeMap<T> {
 
 fn index(resolution: u32, x: &na::Vector3<f32>) -> usize {
     let resolution = resolution as usize;
-    let (face, texcoords) = Face::coords(x);
+    let (face, coords) = Face::coords(x);
+    let texcoords = coords * 0.5 + na::Vector2::new(0.5, 0.5);
     let texel = discretize(resolution, texcoords);
     face as usize * resolution * resolution + texel.1 * resolution + texel.0
 }
@@ -369,14 +372,13 @@ impl Face {
         }
     }
 
-    /// Compute which `Face` a vector intersects, and where the intersection lies
+    /// Compute which `Face` a vector intersects, and where the intersection lies in [-1..1]^2
     pub fn coords<N: RealField + Copy>(x: &na::Vector3<N>) -> (Face, na::Point2<N>) {
         let face = Self::from_vector(x);
         let wrt_face = face.basis().inverse_transform_vector(x);
         (
             face,
-            na::Point2::from(wrt_face.xy() * (na::convert::<_, N>(0.5) / wrt_face.z))
-                + na::Vector2::new(0.5, 0.5).cast(),
+            na::Point2::from(wrt_face.xy() / wrt_face.z).map(unwarp),
         )
     }
 
@@ -451,6 +453,7 @@ impl Face {
         self,
         coords: &na::Point2<N>,
     ) -> na::Unit<na::Vector3<N>> {
+        let coords = coords.map(warp);
         let dir_z = na::Unit::new_normalize(na::Vector3::new(coords.x, coords.y, N::one()));
         self.basis() * dir_z
     }
@@ -466,13 +469,26 @@ pub struct Coords {
 
 impl Coords {
     pub fn from_vector(resolution: u32, vector: &na::Vector3<f32>) -> Self {
-        let (face, unit_coords) = Face::coords(vector);
-        let (x, y) = discretize(resolution as usize, unit_coords);
-        Self {
-            x: x as u32,
-            y: y as u32,
-            face,
-        }
+        Self::from_vector_with_coords(resolution, vector).0
+    }
+
+    /// Compute the coordinates of the cell containing `vector`, and its [0..1]^2 coordinates within
+    /// that cell
+    pub fn from_vector_with_coords(
+        resolution: u32,
+        vector: &na::Vector3<f32>,
+    ) -> (Self, na::Point2<f32>) {
+        let (face, coords) = Face::coords(vector);
+        let coords = coords * 0.5 + na::Vector2::new(0.5, 0.5);
+        let (x, y) = discretize(resolution as usize, coords);
+        (
+            Self {
+                x: x as u32,
+                y: y as u32,
+                face,
+            },
+            coords,
+        )
     }
 
     pub fn neighbors(&self, resolution: u32) -> [Self; 4] {
@@ -532,51 +548,45 @@ impl Coords {
             (na::clamp(x, -1.0, 1.0) + 1.0) / 2.0
         }
         Face::iter()
-            .filter(move |f| {
-                (f.basis() * na::Vector3::z())
-                    .dot(&direction)
-                    .is_sign_positive()
-            })
+            .filter(move |f| (f.basis() * na::Vector3::z()).dot(&direction) > 0.0)
             .filter_map(move |face| {
-                use std::f32::consts::FRAC_PI_4;
                 let local = face.basis().inverse_transform_vector(&direction);
-                let local = local.xy() / local.z;
-                // atan(x / 1) = angle of `local` around Y axis through cube origin ("midpoint x")
-                let theta_m_x = local.x.atan();
-                // tan(θ_mx - θ) * 1 = coordinate of the intersection of the X lower bound with the cube
-                let x_lower = theta_m_x - theta;
-                if x_lower > FRAC_PI_4 {
+                let rot_x = na::UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), theta);
+                let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), -theta);
+                let coords_with = |r| {
+                    let w: na::Vector3<f32> = r * local;
+                    w.xy() / w.z
+                };
+                let lower_x = coords_with(rot_x.inverse()).x;
+                if lower_x > 1.0 {
                     return None;
                 }
-                // tan(θ_mx + θ) * 1 = coordinate of the intersection of the X upper bound with the cube
-                let x_upper = theta_m_x + theta;
-                if x_upper < -FRAC_PI_4 {
+                let lower_y = coords_with(rot_y.inverse()).y;
+                if lower_y > 1.0 {
                     return None;
                 }
-                // once more, perpendicular!
-                let theta_m_y = local.y.atan();
-                let y_lower = theta_m_y - theta;
-                if y_lower > FRAC_PI_4 {
+                let lower = na::Vector2::new(lower_x, lower_y);
+
+                let upper_x = coords_with(rot_x).x;
+                if upper_x < -1.0 {
                     return None;
                 }
-                let y_upper = theta_m_y + theta;
-                if y_upper < -FRAC_PI_4 {
+                let upper_y = coords_with(rot_y).y;
+                if upper_y < -1.0 {
                     return None;
                 }
-                Some((
-                    face,
-                    (x_lower.tan(), y_lower.tan()),
-                    (x_upper.tan(), y_upper.tan()),
-                ))
+                let upper = na::Vector2::new(upper_x, upper_y);
+
+                Some((face, lower.map(unwarp), upper.map(unwarp)))
             })
             .flat_map(move |(face, lower, upper)| {
                 let (x_lower, y_lower) = discretize(
                     resolution as usize,
-                    na::Point2::new(remap(lower.0), remap(lower.1)),
+                    na::Point2::new(remap(lower.x), remap(lower.y)),
                 );
                 let (x_upper, y_upper) = discretize(
                     resolution as usize,
-                    na::Point2::new(remap(upper.0), remap(upper.1)),
+                    na::Point2::new(remap(upper.x), remap(upper.y)),
                 );
                 (y_lower..=y_upper).flat_map(move |y| {
                     (x_lower..=x_upper).map(move |x| Self {
@@ -657,6 +667,51 @@ impl Coords {
             _simd: PhantomData,
         }
     }
+}
+
+/// Distort a [-1..1] cube face coordinate such that, when projected onto a sphere, area is close
+/// to equal
+fn warp<N: RealField + Copy>(x: N) -> N {
+    // 5th-order polynomial from "Cube-to-sphere Projections for Procedural Texturing and Beyond"
+    // (Zucker, Higashi).
+    let x2 = x * x;
+    (na::convert::<_, N>(0.745558715593)
+        + (na::convert::<_, N>(0.130546850193) + na::convert::<_, N>(0.123894434214) * x2) * x2)
+        * x
+}
+
+#[cfg(feature = "simd")]
+fn warp_ps<S: Simd>(x: S::Vf32) -> S::Vf32 {
+    let x2 = x * x;
+    unsafe {
+        (S::set1_ps(0.745558715593)
+            + (S::set1_ps(0.130546850193) + S::set1_ps(0.123894434214) * x2) * x2)
+            * x
+    }
+}
+
+/// Derivative of `warp`
+fn dwarp<N: RealField + Copy>(x: N) -> N {
+    let x2 = x * x;
+    (na::convert::<_, N>(0.61947217107) * x2 + na::convert::<_, N>(0.391640550579)) * x2
+        + na::convert::<_, N>(0.745558715593)
+}
+
+/// Inverse of `warp`
+fn unwarp<N: RealField + Copy>(x: N) -> N {
+    let x2 = x * x;
+
+    // Approximate inverse using a numerically fit curve
+    let mut estimate = (na::convert::<_, N>(1.34318229552)
+        + (na::convert::<_, N>(-0.486514066449) + na::convert::<_, N>(0.143331770927) * x2) * x2)
+        * x;
+
+    // Refine estimate with newton's method
+    for _ in 0..2 {
+        estimate -= (warp(estimate) - x) / dwarp(estimate);
+    }
+
+    estimate
 }
 
 /// Edge of a quad
@@ -798,13 +853,16 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
             let pos_on_face_x = origin_on_face_x + offset_x;
             let pos_on_face_y = origin_on_face_y + offset_y;
 
+            let warped_x = warp_ps::<S>(pos_on_face_x);
+            let warped_y = warp_ps::<S>(pos_on_face_y);
+
             let len = S::sqrt_ps(S::fmadd_ps(
-                pos_on_face_y,
-                pos_on_face_y,
-                S::fmadd_ps(pos_on_face_x, pos_on_face_x, S::set1_ps(1.0)),
+                warped_y,
+                warped_y,
+                S::fmadd_ps(warped_x, warped_x, S::set1_ps(1.0)),
             ));
-            let dir_x = pos_on_face_x / len;
-            let dir_y = pos_on_face_y / len;
+            let dir_x = warped_x / len;
+            let dir_y = warped_y / len;
             let dir_z = S::set1_ps(1.0) / len;
 
             let basis = self.coords.face.basis::<f32>();
@@ -939,30 +997,13 @@ mod test {
 
     #[test]
     fn face_coord_sanity() {
-        assert_eq!(
-            Face::coords(&na::Vector3::x()),
-            (Face::Px, na::Point2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            Face::coords(&na::Vector3::y()),
-            (Face::Py, na::Point2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            Face::coords(&na::Vector3::z()),
-            (Face::Pz, na::Point2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            Face::coords(&-na::Vector3::x()),
-            (Face::Nx, na::Point2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            Face::coords(&-na::Vector3::y()),
-            (Face::Ny, na::Point2::new(0.5, 0.5))
-        );
-        assert_eq!(
-            Face::coords(&-na::Vector3::z()),
-            (Face::Nz, na::Point2::new(0.5, 0.5))
-        );
+        let o = na::Point2::<f32>::origin();
+        assert_eq!(Face::coords(&na::Vector3::x()), (Face::Px, o));
+        assert_eq!(Face::coords(&na::Vector3::y()), (Face::Py, o));
+        assert_eq!(Face::coords(&na::Vector3::z()), (Face::Pz, o));
+        assert_eq!(Face::coords(&-na::Vector3::x()), (Face::Nx, o));
+        assert_eq!(Face::coords(&-na::Vector3::y()), (Face::Ny, o));
+        assert_eq!(Face::coords(&-na::Vector3::z()), (Face::Nz, o));
     }
 
     #[test]
@@ -1113,5 +1154,38 @@ mod test {
                 na::Unit::new_unchecked(na::Vector3::new(x.0, y.0, z.0))
             );
         }
+    }
+
+    #[test]
+    fn warp_roundtrip() {
+        for i in -100..100 {
+            let x = i as f32 / 100.0;
+            dbg!(i);
+            assert_abs_diff_eq!(x, unwarp(warp(x)));
+        }
+    }
+
+    #[test]
+    fn direction_roundtrip() {
+        for face in Face::iter() {
+            for y in -10..10 {
+                for x in -10..10 {
+                    let p = na::Point2::new(x as f32 / 11.0, y as f32 / 11.0);
+                    let v = face.direction(&p);
+                    let (actual_face, actual_p) = Face::coords(&v);
+                    assert_eq!(face, actual_face);
+                    assert_abs_diff_eq!(p, actual_p);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn neighborhood_consistency() {
+        let dir = na::Vector3::new(-5_195_083.148, 3_582_099.8, -877_091.25);
+        assert_eq!(
+            Coords::from_vector(4096, &dir),
+            Coords::neighborhood(4096, dir, 0.0).next().unwrap()
+        );
     }
 }

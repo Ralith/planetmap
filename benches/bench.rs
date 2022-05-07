@@ -1,16 +1,28 @@
-use std::sync::Arc;
-
 use criterion::{criterion_group, criterion_main, Criterion};
+#[cfg(feature = "parry")]
 use parry3d_f64::{
     query::{PointQuery, QueryDispatcher, Ray, RayCast},
     shape::Ball,
 };
 
+#[cfg(feature = "parry")]
 use planetmap::parry::{FlatTerrain, Planet, PlanetDispatcher};
 use planetmap::*;
 
-criterion_group!(benches, cache, collision);
+#[cfg(feature = "parry")]
+criterion_group!(benches, cache, face_coords, collision);
+#[cfg(not(feature = "parry"))]
+criterion_group!(benches, cache, face_coords);
 criterion_main!(benches);
+
+fn face_coords(c: &mut Criterion) {
+    c.bench_function("get vector coordinates on face", |b| {
+        b.iter(|| {
+            let v = na::Vector3::new(0.42, 0.17, 0.12);
+            criterion::black_box(cubemap::Face::coords(&v));
+        });
+    });
+}
 
 fn cache(c: &mut Criterion) {
     let mut mgr = CacheManager::new(2048, Default::default());
@@ -48,7 +60,10 @@ fn resolve_transfers(mgr: &mut CacheManager, transfers: &mut Vec<Chunk>) {
     }
 }
 
+#[cfg(feature = "parry")]
 fn collision(c: &mut Criterion) {
+    use std::sync::Arc;
+
     const PLANET_RADIUS: f64 = 6371e3;
     let ball = Ball { radius: 1.0 };
     let planet = Planet::new(
