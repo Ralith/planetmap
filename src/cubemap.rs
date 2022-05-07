@@ -580,14 +580,10 @@ impl Coords {
                 Some((face, lower.map(unwarp), upper.map(unwarp)))
             })
             .flat_map(move |(face, lower, upper)| {
-                let (x_lower, y_lower) = discretize(
-                    resolution as usize,
-                    na::Point2::new(remap(lower.x), remap(lower.y)),
-                );
-                let (x_upper, y_upper) = discretize(
-                    resolution as usize,
-                    na::Point2::new(remap(upper.x), remap(upper.y)),
-                );
+                let (x_lower, y_lower) =
+                    discretize(resolution as usize, na::Point2::from(lower.map(remap)));
+                let (x_upper, y_upper) =
+                    discretize(resolution as usize, na::Point2::from(upper.map(remap)));
                 (y_lower..=y_upper).flat_map(move |y| {
                     (x_lower..=x_upper).map(move |x| Self {
                         x: x as u32,
