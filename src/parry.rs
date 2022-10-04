@@ -530,9 +530,18 @@ impl QueryDispatcher for PlanetDispatcher {
         g1: &dyn Shape,
         g2: &dyn Shape,
         max_toi: Real,
+        stop_at_penetration: bool,
     ) -> Result<Option<TOI>, Unsupported> {
         if let Some(p1) = g1.downcast_ref::<Planet>() {
-            return Ok(compute_toi(pos12, vel12, p1, g2, max_toi, false));
+            return Ok(compute_toi(
+                pos12,
+                vel12,
+                p1,
+                g2,
+                max_toi,
+                stop_at_penetration,
+                false,
+            ));
         }
         if let Some(p2) = g2.downcast_ref::<Planet>() {
             return Ok(compute_toi(
@@ -541,6 +550,7 @@ impl QueryDispatcher for PlanetDispatcher {
                 p2,
                 g1,
                 max_toi,
+                stop_at_penetration,
                 true,
             ));
         }
@@ -605,6 +615,7 @@ fn compute_toi(
     planet: &Planet,
     other: &dyn Shape,
     max_toi: Real,
+    stop_at_penetration: bool,
     flipped: bool,
 ) -> Option<TOI> {
     // TODO after https://github.com/dimforge/parry/issues/8
@@ -618,9 +629,16 @@ fn compute_toi(
     let mut closest = None::<TOI>;
     planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
         let impact = if flipped {
-            dispatcher.time_of_impact(&pos12.inverse(), &-vel12, other, triangle, max_toi)
+            dispatcher.time_of_impact(
+                &pos12.inverse(),
+                &-vel12,
+                other,
+                triangle,
+                max_toi,
+                stop_at_penetration,
+            )
         } else {
-            dispatcher.time_of_impact(pos12, vel12, triangle, other, max_toi)
+            dispatcher.time_of_impact(pos12, vel12, triangle, other, max_toi, stop_at_penetration)
         };
         if let Ok(Some(impact)) = impact {
             closest = Some(match closest {
@@ -1121,6 +1139,7 @@ mod tests {
                 &planet,
                 &ball,
                 100.0,
+                false,
             )
             .unwrap()
             .expect("toi not found");
