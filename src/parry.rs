@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use hashbrown::hash_map;
 use hashbrown::HashMap;
 use parry3d_f64::{
-    bounding_volume::{BoundingSphere, BoundingVolume, AABB},
+    bounding_volume::{BoundingSphere, BoundingVolume, Aabb},
     mass_properties::MassProperties,
     math::{Isometry, Point, Real, Vector},
     query::{
@@ -325,8 +325,8 @@ impl PointQuery for Planet {
 }
 
 impl Shape for Planet {
-    fn compute_local_aabb(&self) -> AABB {
-        AABB::from_half_extents(Point::origin(), Vector::repeat(self.max_radius()))
+    fn compute_local_aabb(&self) -> Aabb {
+        Aabb::from_half_extents(Point::origin(), Vector::repeat(self.max_radius()))
     }
 
     fn compute_local_bounding_sphere(&self) -> BoundingSphere {
