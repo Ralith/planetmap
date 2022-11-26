@@ -467,4 +467,21 @@ mod test {
             assert_eq!(transfers.len(), expected - actual);
         }
     }
+
+    #[test]
+    fn subdivision_sanity() {
+        let chunk = Chunk {
+            depth: 10,
+            coords: crate::cubemap::Coords {
+                x: 12,
+                y: 34,
+                face: Face::Px,
+            },
+        };
+        // Verify that a chunk containing the viewpoint gets subdivided
+        assert!(needs_subdivision(
+            &chunk,
+            &na::Point3::from(chunk.direction(&[0.5; 2].into()).into_inner())
+        ));
+    }
 }
