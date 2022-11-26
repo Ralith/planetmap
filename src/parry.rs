@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use hashbrown::hash_map;
 use hashbrown::HashMap;
 use parry3d_f64::{
-    bounding_volume::{BoundingSphere, BoundingVolume, Aabb},
+    bounding_volume::{Aabb, BoundingSphere, BoundingVolume},
     mass_properties::MassProperties,
     math::{Isometry, Point, Real, Vector},
     query::{
