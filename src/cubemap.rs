@@ -667,7 +667,7 @@ impl Coords {
 
 /// Distort a [-1..1] cube face coordinate such that, when projected onto a sphere, area is close
 /// to equal
-fn warp<N: RealField + Copy>(x: N) -> N {
+pub(crate) fn warp<N: RealField + Copy>(x: N) -> N {
     // 5th-order polynomial from "Cube-to-sphere Projections for Procedural Texturing and Beyond"
     // (Zucker, Higashi).
     let x2 = x * x;
@@ -694,7 +694,7 @@ fn dwarp<N: RealField + Copy>(x: N) -> N {
 }
 
 /// Inverse of `warp`
-fn unwarp<N: RealField + Copy>(x: N) -> N {
+pub(crate) fn unwarp<N: RealField + Copy>(x: N) -> N {
     let x2 = x * x;
 
     // Approximate inverse using a numerically fit curve

@@ -128,7 +128,8 @@ impl Chunk {
         let vec = na::Vector2::new(self.coords.x, self.coords.y)
             .map(f64::from)
             .cast::<N>()
-            .map(|x| (x + na::convert(0.5)) * size - na::convert(1.0));
+            .map(|x| (x + na::convert(0.5)) * size - na::convert(1.0))
+            .map(crate::cubemap::warp);
         na::Unit::new_normalize(vec.push(na::convert(1.0)))
     }
 
@@ -355,6 +356,27 @@ mod test {
         assert_eq!(
             Chunk::root(Face::Pz).origin_on_face::<f32>(),
             na::Vector3::z_axis()
+        );
+
+        let chunk = Chunk {
+            coords: Coords {
+                x: 12,
+                y: 47,
+                face: Face::Px,
+            },
+            depth: 12,
+        };
+        assert_eq!(
+            chunk,
+            Chunk::from_vector(
+                chunk.depth,
+                (chunk.coords.face.basis() * chunk.origin_on_face()).as_ref()
+            )
+        );
+
+        assert_abs_diff_eq!(
+            chunk.coords.face.basis() * chunk.origin_on_face(),
+            chunk.direction(&na::Point2::new(0.5, 0.5))
         );
     }
 
