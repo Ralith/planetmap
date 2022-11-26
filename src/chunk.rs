@@ -122,15 +122,15 @@ impl Chunk {
 
     /// Location of the center of this chunk on the surface of the sphere
     ///
-    /// Transform by face.basis() to get world origin
-    pub fn origin_on_face<N: RealField + Copy>(&self) -> na::Unit<na::Vector3<N>> {
+    /// Shorthand for `direction(&[0.5; 2].into())`.
+    pub fn origin<N: RealField + Copy>(&self) -> na::Unit<na::Vector3<N>> {
         let size = self.edge_length::<N>();
         let vec = na::Vector2::new(self.coords.x, self.coords.y)
             .map(f64::from)
             .cast::<N>()
             .map(|x| (x + na::convert(0.5)) * size - na::convert(1.0))
             .map(crate::cubemap::warp);
-        na::Unit::new_normalize(vec.push(na::convert(1.0)))
+        self.coords.face.basis() * na::Unit::new_normalize(vec.push(na::convert(1.0)))
     }
 
     /// Returns a grid of resolution^2 directions contained by the chunk, in scan-line order
@@ -353,10 +353,7 @@ mod test {
 
     #[test]
     fn origin_sanity() {
-        assert_eq!(
-            Chunk::root(Face::Pz).origin_on_face::<f32>(),
-            na::Vector3::z_axis()
-        );
+        assert_eq!(Chunk::root(Face::Pz).origin::<f32>(), na::Vector3::z_axis());
 
         let chunk = Chunk {
             coords: Coords {
@@ -368,16 +365,10 @@ mod test {
         };
         assert_eq!(
             chunk,
-            Chunk::from_vector(
-                chunk.depth,
-                (chunk.coords.face.basis() * chunk.origin_on_face()).as_ref()
-            )
+            Chunk::from_vector(chunk.depth, chunk.origin().as_ref())
         );
 
-        assert_abs_diff_eq!(
-            chunk.coords.face.basis() * chunk.origin_on_face(),
-            chunk.direction(&na::Point2::new(0.5, 0.5))
-        );
+        assert_abs_diff_eq!(chunk.origin(), chunk.direction(&na::Point2::new(0.5, 0.5)));
     }
 
     #[test]

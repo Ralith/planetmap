@@ -307,7 +307,7 @@ fn needs_subdivision(chunk: &Chunk, viewpoint: &na::Point3<f64>) -> bool {
     // threshold larger than this leads to LoD deltas greater than 1 across edges.
     let max_half_angle = 1.0f64.atan2(10.0f64.sqrt());
 
-    let center = na::Point3::from(chunk.coords.face.basis() * chunk.origin_on_face().into_inner());
+    let center = na::Point3::from(chunk.origin().into_inner());
     if center.coords.dot(&viewpoint.coords) < 0.0 {
         return false;
     }
