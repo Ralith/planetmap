@@ -125,14 +125,11 @@ impl Chunk {
     /// Transform by face.basis() to get world origin
     pub fn origin_on_face<N: RealField + Copy>(&self) -> na::Unit<na::Vector3<N>> {
         let size = self.edge_length::<N>();
-        let vec = na::Vector3::new(
-            (na::convert::<_, N>(self.coords.x as f64) + na::convert::<_, N>(0.5)) * size
-                - na::convert(1.0),
-            (na::convert::<_, N>(self.coords.y as f64) + na::convert::<_, N>(0.5)) * size
-                - na::convert(1.0),
-            na::convert(1.0),
-        );
-        na::Unit::new_normalize(vec)
+        let vec = na::Vector2::new(self.coords.x, self.coords.y)
+            .map(f64::from)
+            .cast::<N>()
+            .map(|x| (x + na::convert(0.5)) * size - na::convert(1.0));
+        na::Unit::new_normalize(vec.push(na::convert(1.0)))
     }
 
     /// Returns a grid of resolution^2 directions contained by the chunk, in scan-line order
