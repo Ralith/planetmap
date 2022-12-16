@@ -97,13 +97,13 @@ impl Manager {
             if available >= transfer.len() {
                 break;
             }
-            if !self.chunks.contains(idx as usize)
-                || !self.chunks[idx as usize].ready
-                || self.chunks[idx as usize].in_frame == self.frame
+            if !self.chunks.contains(idx)
+                || !self.chunks[idx].ready
+                || self.chunks[idx].in_frame == self.frame
             {
                 continue;
             }
-            let old = self.chunks.remove(idx as usize);
+            let old = self.chunks.remove(idx);
             self.index.remove(&old.chunk);
             available += 1;
         }

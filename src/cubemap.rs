@@ -242,7 +242,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let total = self.resolution as usize * self.resolution as usize;
-        let remaining = (total - self.index) as usize;
+        let remaining = total - self.index;
         (remaining, Some(remaining))
     }
 }
@@ -250,7 +250,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 impl<T> ExactSizeIterator for Iter<'_, T> {
     fn len(&self) -> usize {
         let total = self.resolution as usize * self.resolution as usize;
-        (total - self.index) as usize
+        total - self.index
     }
 }
 
@@ -285,7 +285,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let total = self.resolution as usize * self.resolution as usize;
-        let remaining = (total - self.index) as usize;
+        let remaining = total - self.index;
         (remaining, Some(remaining))
     }
 }
@@ -293,7 +293,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 impl<T> ExactSizeIterator for IterMut<'_, T> {
     fn len(&self) -> usize {
         let total = self.resolution as usize * self.resolution as usize;
-        (total - self.index) as usize
+        total - self.index
     }
 }
 
