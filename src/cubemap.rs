@@ -548,9 +548,13 @@ impl Coords {
             (na::clamp(x, -1.0, 1.0) + 1.0) / 2.0
         }
         Face::iter()
-            .filter(move |f| (f.basis() * na::Vector3::z()).dot(&direction) > 0.0)
             .filter_map(move |face| {
-                let local = face.basis().inverse_transform_vector(&direction);
+                let basis = face.basis();
+                if (basis * na::Vector3::z()).dot(&direction) <= 0.0 {
+                    // TODO: Handle theta ≥ π/2
+                    return None;
+                }
+                let local = basis.inverse_transform_vector(&direction);
                 let rot_x = na::UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), theta);
                 let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), -theta);
                 let coords_with = |r| {
