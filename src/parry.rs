@@ -1015,9 +1015,90 @@ impl WorkspaceData for WorkspaceVsComposite {
     }
 }
 
+/// Quad defined by a chunk pre-displacement
+///
+/// Generally neither flat nor square.
+#[derive(Copy, Clone, Debug)]
+struct Patch {
+    // (0, 0) a--b
+    //        |  |
+    //        c--d (1,1)
+    a: na::Vector3<f64>,
+    b: na::Vector3<f64>,
+    c: na::Vector3<f64>,
+    d: na::Vector3<f64>,
+}
+
+impl Patch {
+    pub fn new(coords: &Coords, face_resolution: u32) -> Self {
+        Self {
+            a: coords
+                .direction(face_resolution, &[0.0, 0.0].into())
+                .into_inner(),
+            b: coords
+                .direction(face_resolution, &[1.0, 0.0].into())
+                .into_inner(),
+            c: coords
+                .direction(face_resolution, &[0.0, 1.0].into())
+                .into_inner(),
+            d: coords
+                .direction(face_resolution, &[1.0, 1.0].into())
+                .into_inner(),
+        }
+    }
+
+    /// Map a point from patch space to a direction in sphere space
+    fn get(&self, coords: &na::Point2<f64>) -> na::Vector3<f64> {
+        // Future work: Simplify projection by interpreting a patch as two flat triangles rather
+        // than one smooth bilerped surface
+        let y0 = self.a * (1.0 - coords.x) + self.b * coords.x;
+        let y1 = self.c * (1.0 - coords.x) + self.d * coords.x;
+        y0 * (1.0 - coords.y) + y1 * coords.y
+    }
+
+    /// Map a direction in sphere space to a point in patch space
+    fn project(&self, dir: &na::Vector3<f64>) -> na::Point2<f64> {
+        // https://iquilezles.org/articles/ibilinear/
+        use crate::cubemap::Face;
+
+        let (i, j) = match Face::from_vector(dir) {
+            Face::Px | Face::Nx => (1, 2),
+            Face::Py | Face::Ny => (0, 2),
+            Face::Pz | Face::Nz => (0, 1),
+        };
+        let e = self.b - self.a;
+        let f = self.c - self.a;
+        let g = self.a - self.b + self.d - self.c;
+        let h = dir - self.a;
+
+        let k2 = g[i] * f[j] - g[j] * f[i];
+        let k1 = e[i] * f[j] - e[j] * f[i] + h[i] * g[j] - h[j] * g[i];
+        let k0 = h[i] * e[j] - h[j] * e[i];
+
+        if k2.abs() < 1e-3 {
+            // Linear case
+            return na::Point2::new((h[i] * k1 + f[i] * k0) / (e[i] * k1 - g[i] * k0), -k0 / k1);
+        }
+
+        // Quadratic case
+        let w = (k1 * k1 - 4.0 * k0 * k2).max(0.0).sqrt();
+        let ik2 = 0.5 / k2;
+        let v = (-k1 - w) * ik2;
+        let u = (h[i] - f[i] * v) / (e[i] + g[i] * v);
+        if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
+            na::Point2::new(u, v)
+        } else {
+            // Other quadratic solution
+            let v = (-k1 + w) * ik2;
+            let u = (h[i] - f[i] * v) / (e[i] + g[i] * v);
+            na::Point2::new(u, v)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use approx::assert_relative_eq;
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
     use parry3d_f64::{query::TOIStatus, shape::Ball};
 
     use crate::cubemap::Face;
@@ -1311,5 +1392,59 @@ mod tests {
             )
             .unwrap();
         assert!(toi.is_none());
+    }
+
+    #[test]
+    fn patch_interpolation() {
+        let res = 2u32.pow(12);
+        let chunk = Coords {
+            x: 12,
+            y: 47,
+            face: Face::Px,
+        };
+        let patch = Patch::new(&chunk, res);
+
+        // Verify that the corners are consistent. All other points won't be, since
+        // `Coords::direction` interpolates on the sphere.
+        for coords in [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]] {
+            // Exact equality is intended here, as a prerequisite for neighboring patches to be
+            // seamless.
+            assert_eq!(
+                patch.get(&coords.into()),
+                chunk.direction(res, &coords.into()).into_inner()
+            );
+        }
+    }
+
+    #[test]
+    fn patch_projection() {
+        let res = 2u32.pow(12);
+        let chunk = Coords {
+            x: 12,
+            y: 47,
+            face: Face::Px,
+        };
+        let patch = Patch::new(&chunk, res);
+
+        let coords = [0.1, 0.4].into();
+        assert_abs_diff_eq!(patch.project(&patch.get(&coords)), coords, epsilon = 1e-4);
+
+        let coords = [0.9, 0.7].into();
+        assert_abs_diff_eq!(patch.project(&patch.get(&coords)), coords, epsilon = 1e-4);
+    }
+
+    #[test]
+    fn patch_projection_2() {
+        // Regression test for a case that needs the second quadratic solution
+        let patch = Patch {
+            a: [1.0, 1.1, 0.0].into(),
+            b: [1.0, 1.2, 1.3].into(),
+            c: [1.0, -0.1, -0.1].into(),
+            d: [1.0, 0.0, 1.0].into(),
+        };
+
+        let p = patch.project(&na::Vector3::new(1.0, 0.1, 0.1));
+        assert!(p.x >= 0.0 && p.x <= 1.0);
+        assert!(p.y >= 0.0 && p.y <= 1.0);
     }
 }
