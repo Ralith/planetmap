@@ -18,7 +18,7 @@ use parry3d_f64::{
         PersistentQueryDispatcher, PointProjection, PointQuery, QueryDispatcher, Ray, RayCast,
         RayIntersection, TypedWorkspaceData, Unsupported, WorkspaceData, TOI,
     },
-    shape::{FeatureId, Shape, ShapeType, SimdCompositeShape, Triangle, TypedShape},
+    shape::{FeatureId, HalfSpace, Shape, ShapeType, SimdCompositeShape, Triangle, TypedShape},
     utils::IsometryOpt,
 };
 
@@ -255,20 +255,30 @@ fn raycast_edges(
     ray: &Ray,
     max_toi: Real,
 ) -> Option<(Edge, Real)> {
-    use parry3d_f64::shape::HalfSpace;
+    let quad = [[0, 0], [1, 0], [0, 1], [1, 1]].map(|coords| {
+        chunk
+            .direction(resolution, &na::Point2::from(coords).cast::<f64>())
+            .into_inner()
+    });
+    raycast_quad_edges(ray, &quad, max_toi)
+}
 
-    let edges: [(Edge, [[f64; 2]; 2]); 4] = [
-        (Edge::Nx, [[0.0, 1.0], [0.0, 0.0]]),
-        (Edge::Ny, [[0.0, 0.0], [1.0, 0.0]]),
-        (Edge::Px, [[1.0, 0.0], [1.0, 1.0]]),
-        (Edge::Py, [[1.0, 1.0], [0.0, 1.0]]),
+/// `quad` is row-major vectors from the origin
+fn raycast_quad_edges(
+    ray: &Ray,
+    [a, b, c, d]: &[na::Vector3<f64>; 4],
+    max_toi: f64,
+) -> Option<(Edge, f64)> {
+    let edges: [(Edge, [&na::Vector3<f64>; 2]); 4] = [
+        (Edge::Nx, [c, a]),
+        (Edge::Ny, [a, b]),
+        (Edge::Px, [b, d]),
+        (Edge::Py, [d, c]),
     ];
 
     let mut closest = None;
-    for &(edge, corners) in edges.iter() {
+    for &(edge, [v1, v2]) in edges.iter() {
         // Construct inward-facing edge planes
-        let v1 = chunk.direction(resolution, &na::Point2::from(corners[0]));
-        let v2 = chunk.direction(resolution, &na::Point2::from(corners[1]));
         let plane = HalfSpace {
             normal: na::Unit::new_normalize(v1.cross(&v2)),
         };
