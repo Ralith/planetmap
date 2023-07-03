@@ -729,6 +729,17 @@ impl Edge {
     pub fn iter() -> impl Iterator<Item = Edge> {
         [Edge::Nx, Edge::Ny, Edge::Px, Edge::Py].into_iter()
     }
+
+    /// Unit vector across the edge
+    pub fn direction<N: RealField>(self) -> na::UnitVector2<N> {
+        let x = match self {
+            Edge::Nx => [-1.0, 0.0],
+            Edge::Ny => [0.0, -1.0],
+            Edge::Px => [1.0, 0.0],
+            Edge::Py => [0.0, 1.0],
+        };
+        na::Unit::new_unchecked(na::Vector2::from(x).cast())
+    }
 }
 
 impl Neg for Edge {

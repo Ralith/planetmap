@@ -1106,6 +1106,86 @@ impl Patch {
     }
 }
 
+/// Identifies a pair of triangles
+struct Quad {
+    /// Row-major order
+    corners: [na::Vector3<f64>; 4],
+    position: na::Point2<u32>,
+}
+
+impl Quad {
+    fn displace(
+        &self,
+        radius: f64,
+        chunk_resolution: u32,
+        chunk_samples: &[f32],
+    ) -> [na::Vector3<f64>; 4] {
+        let offsets = [[0, 0], [1, 0], [0, 1], [1, 1]];
+        let mut result = self.corners;
+        for (v, offset) in result.iter_mut().zip(offsets) {
+            let sample = self.position + na::Vector2::from(offset);
+            let displacement = chunk_samples[(sample.y * chunk_resolution + sample.x) as usize];
+            // We deliberately don't normalize `v` in `v * radius` because we're displacing a
+            // subdivided patch, not the surface of the sphere directly.
+            *v = *v * radius + v.normalize() * f64::from(displacement);
+        }
+        result
+    }
+
+    fn triangles(
+        &self,
+        radius: f64,
+        chunk_resolution: u32,
+        chunk_samples: &[f32],
+    ) -> [Triangle; 2] {
+        let [p0, p1, p2, p3] = self
+            .displace(radius, chunk_resolution, chunk_samples)
+            .map(na::Point3::from);
+        [Triangle::new(p0, p1, p3), Triangle::new(p3, p2, p0)]
+    }
+}
+
+/// Invoke `f` on the row-major corners of every quad in `patch` along `ray`, which much originate
+/// within `patch`. Returns the patch edge reached and the ray toi at which the edge was reached, if
+/// any.
+///
+/// - `ray` must start within `patch`
+/// - `f` returns whether to continue
+fn walk_patch(
+    quad_resolution: u32,
+    patch: &Patch,
+    ray: &Ray,
+    max_toi: f64,
+    mut f: impl FnMut(&Quad) -> bool,
+) -> Option<(Edge, f64)> {
+    let quad_resolution = quad_resolution as f64;
+    let start = patch.project(&ray.origin.coords);
+    let mut quad = start.map(|x| {
+        (x * quad_resolution)
+            .trunc()
+            .clamp(0.0, quad_resolution - 1.0)
+    });
+    let offsets = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+    loop {
+        let candidate = Quad {
+            corners: offsets.map(|x| patch.get(&((quad + na::Vector2::from(x)) / quad_resolution))),
+            position: quad.map(|x| x as u32),
+        };
+        if !f(&candidate) {
+            return None;
+        }
+        // Find the next quad along the ray
+        let Some((edge, toi)) = raycast_quad_edges(ray, &candidate.corners, max_toi) else {
+            return None;
+        };
+        quad += edge.direction().into_inner();
+        if quad.x >= quad_resolution || quad.y >= quad_resolution || quad.x < 0.0 || quad.y < 0.0 {
+            // Reached the edge of the patch
+            return Some((edge, toi));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
@@ -1456,5 +1536,98 @@ mod tests {
         let p = patch.project(&na::Vector3::new(1.0, 0.1, 0.1));
         assert!(p.x >= 0.0 && p.x <= 1.0);
         assert!(p.y >= 0.0 && p.y <= 1.0);
+    }
+
+    #[test]
+    fn patch_projection_3() {
+        // Regression test for a case that needs the second quadratic solution
+        let patch = Patch {
+            a: [1.0, 2.0, 1.0].into(),
+            b: [1.0, 2.0, 2.0].into(),
+            c: [1.0, 1.0, 1.0].into(),
+            d: [1.0, 1.0, 2.0].into(),
+        };
+
+        assert_abs_diff_eq!(
+            patch.project(&na::Vector3::new(1.0, 1.1, 1.1)),
+            na::Point2::new(0.1, 0.9)
+        );
+        assert_abs_diff_eq!(
+            patch.get(&na::Point2::new(0.1, 0.9)),
+            na::Vector3::new(1.0, 1.1, 1.1)
+        );
+    }
+
+    #[test]
+    fn patch_raycast() {
+        const RESOLUTION: u32 = 2;
+        const Z: f64 = 1e6;
+        // RESOLUTION x RESOLUTION square at z=1
+        let patch = Patch {
+            a: [0.0, 0.0, Z].into(),
+            b: [RESOLUTION as f64, 0.0, Z].into(),
+            c: [0.0, RESOLUTION as f64, Z].into(),
+            d: [RESOLUTION as f64, RESOLUTION as f64, Z].into(),
+        };
+
+        let check_ray = |origin, direction, expected_quads: &[[u32; 2]], expected_edge| {
+            let mut i = 0;
+            let result = walk_patch(
+                RESOLUTION,
+                &patch,
+                &Ray::new(origin, direction),
+                100.0,
+                |quad| {
+                    let expected = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]].map(|offset| {
+                        (na::Vector2::from(expected_quads[i]).cast::<f64>()
+                            + na::Vector2::from(offset))
+                        .push(Z)
+                    });
+                    i += 1;
+                    for (actual, expected) in quad.corners.into_iter().zip(&expected) {
+                        assert_abs_diff_eq!(actual, expected);
+                    }
+                    true
+                },
+            );
+            assert_eq!(result.map(|x| x.0), expected_edge);
+        };
+
+        check_ray(
+            [0.5, 0.5, Z].into(),
+            [1.0, 0.0, 0.0].into(),
+            &[[0, 0], [1, 0]],
+            Some(Edge::Px),
+        );
+        check_ray(
+            [0.5, 0.5, Z].into(),
+            [-1.0, 0.0, 0.0].into(),
+            &[[0, 0]],
+            Some(Edge::Nx),
+        );
+        check_ray(
+            [1.5, 0.5, Z].into(),
+            [-1.0, 0.0, 0.0].into(),
+            &[[1, 0], [0, 0]],
+            Some(Edge::Nx),
+        );
+        check_ray(
+            [1.5, 1.5, Z].into(),
+            [-1.0, 0.0, 0.0].into(),
+            &[[1, 1], [0, 1]],
+            Some(Edge::Nx),
+        );
+        check_ray(
+            [1.5, 1.5, Z].into(),
+            [0.0, 1.0, 0.0].into(),
+            &[[1, 1]],
+            Some(Edge::Py),
+        );
+        check_ray(
+            [1.5, 1.5, Z].into(),
+            [0.0, -1.0, 0.0].into(),
+            &[[1, 1], [1, 0]],
+            Some(Edge::Ny),
+        );
     }
 }
