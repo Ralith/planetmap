@@ -207,40 +207,47 @@ impl RayCast for Planet {
         max_toi: Real,
         solid: bool,
     ) -> Option<RayIntersection> {
-        let quad_resolution = self.chunk_resolution - 1;
-        // Find the quad containing the ray origin
-        let res = self.terrain.face_resolution() * quad_resolution;
-        let mut coords = Coords::from_vector(res, &ray.origin.coords.cast());
+        // Find the chunk containing the ray origin
+        let mut chunk =
+            Coords::from_vector(self.terrain.face_resolution(), &ray.origin.coords.cast());
+        let mut patch = Patch::new(&chunk, self.terrain.face_resolution());
+        let mut ray = *ray;
 
         // Walk along the ray until we hit something
         let cache = &mut *self.cache.lock().unwrap();
         loop {
-            let chunk_coords = Coords {
-                x: coords.x / quad_resolution,
-                y: coords.y / quad_resolution,
-                face: coords.face,
-            };
-            let (slot, data) = cache.get(self, &chunk_coords);
+            let (slot, data) = cache.get(self, &chunk);
             // FIXME: Rays can sometimes slip between bounding planes and the outer edge of a
             // quad. To avoid this, we should extend the quad to form a narrow skirt around the
             // chunk, or check neighboring chunks when very close to a boundary.
 
-            let quad = na::Point2::new(coords.x % quad_resolution, coords.y % quad_resolution);
-            for tri in 0..2 {
-                let triangle =
-                    self.triangle(&chunk_coords, &data.samples, quad.x, quad.y, tri != 0);
-                if let Some(mut hit) = triangle.cast_local_ray_and_get_normal(ray, max_toi, solid) {
-                    let quad_index = quad.y * self.chunk_resolution + quad.x;
-                    let index = (quad_index << 1) | tri;
-                    hit.feature = FeatureId::Face(self.feature_id(slot, index as u32));
-                    return Some(hit);
-                }
+            let mut maybe_hit = None;
+            let edge = walk_patch(self.chunk_resolution - 1, &patch, &ray, max_toi, |quad| {
+                let tris = quad.triangles(self.radius, self.chunk_resolution, &data.samples);
+                let Some((tri, mut hit)) = tris.into_iter()
+                    .enumerate()
+                    .filter_map(|(i, t)| Some((i, t.cast_local_ray_and_get_normal(&ray, max_toi, solid)?)))
+                    .min_by(|a, b| a.1.toi.total_cmp(&b.1.toi))
+                else {
+                    return true;
+                };
+                let quad_index = quad.position.y * self.chunk_resolution + quad.position.x;
+                let index = (quad_index << 1) | tri as u32;
+                hit.feature = FeatureId::Face(self.feature_id(slot, index as u32));
+                maybe_hit = Some(hit);
+                false
+            });
+
+            if let Some(hit) = maybe_hit {
+                return Some(hit);
             }
 
-            match raycast_edges(res, &coords, ray, max_toi) {
+            match edge {
                 None => return None,
-                Some((edge, _)) => {
-                    coords = coords.neighbors(res)[edge];
+                Some((edge, toi)) => {
+                    chunk = chunk.neighbors(self.terrain.face_resolution())[edge];
+                    patch = Patch::new(&chunk, self.terrain.face_resolution());
+                    ray.origin += ray.dir * toi;
                 }
             }
         }
