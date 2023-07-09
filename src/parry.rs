@@ -1038,7 +1038,8 @@ impl WorkspaceData for WorkspaceVsComposite {
 #[derive(Copy, Clone, Debug)]
 struct Patch {
     // (0, 0) a--b
-    //        |  |
+    //        |\ |
+    //        | \|
     //        c--d (1,1)
     a: na::Vector3<f64>,
     b: na::Vector3<f64>,
@@ -1065,51 +1066,57 @@ impl Patch {
     }
 
     /// Map a point from patch space to a direction in sphere space
-    fn get(&self, coords: &na::Point2<f64>) -> na::Vector3<f64> {
-        // Future work: Simplify projection by interpreting a patch as two flat triangles rather
-        // than one smooth bilerped surface
-        let y0 = self.a * (1.0 - coords.x) + self.b * coords.x;
-        let y1 = self.c * (1.0 - coords.x) + self.d * coords.x;
-        y0 * (1.0 - coords.y) + y1 * coords.y
+    fn get(&self, p: &na::Point2<f64>) -> na::Vector3<f64> {
+        // Extend the triangle into a parallelogram, then bilinearly interpolate. This guarantees a
+        // numerically exact result at each vertex, because in that case every vertex's contribution
+        // is multiplied by 0 or 1 exactly and then summed. This precision ensures that there won't
+        // be cracks between patches.
+        let (b, c) = if p.x > p.y {
+            (self.b, self.a + self.d - self.b)
+        } else {
+            (self.a + self.d - self.c, self.c)
+        };
+        let y0 = self.a * (1.0 - p.x) + b * p.x;
+        let y1 = c * (1.0 - p.x) + self.d * p.x;
+        y0 * (1.0 - p.y) + y1 * p.y
     }
 
     /// Map a direction in sphere space to a point in patch space
     fn project(&self, dir: &na::Vector3<f64>) -> na::Point2<f64> {
-        // https://iquilezles.org/articles/ibilinear/
-        use crate::cubemap::Face;
+        // Project onto each triangle, then select the in-bounds result
+        fn project(
+            p: &na::Vector3<f64>,
+            x: na::Vector3<f64>,
+            y: na::Vector3<f64>,
+            dir: &na::Vector3<f64>,
+        ) -> na::Point2<f64> {
+            // Intersect dir with triangle's plane
+            let z = x.cross(&y);
+            let d = p.dot(&z) / dir.dot(&z);
+            let hit = dir * d;
 
-        let (i, j) = match Face::from_vector(dir) {
-            Face::Px | Face::Nx => (1, 2),
-            Face::Py | Face::Ny => (0, 2),
-            Face::Pz | Face::Nz => (0, 1),
-        };
-        let e = self.b - self.a;
-        let f = self.c - self.a;
-        let g = self.a - self.b + self.d - self.c;
-        let h = dir - self.a;
-
-        let k2 = g[i] * f[j] - g[j] * f[i];
-        let k1 = e[i] * f[j] - e[j] * f[i] + h[i] * g[j] - h[j] * g[i];
-        let k0 = h[i] * e[j] - h[j] * e[i];
-
-        if k2.abs() < 1e-3 {
-            // Linear case
-            return na::Point2::new((h[i] * k1 + f[i] * k0) / (e[i] * k1 - g[i] * k0), -k0 / k1);
+            // Basis of triangle space
+            let m = na::Matrix3::from_columns(&[x, y, z]);
+            // Project hit point into triangle space. Could simplify `try_inverse()` by inlining
+            // analytic inversion and dropping the Z row, but the optimizer probably does that for
+            // us.
+            let proj = m.try_inverse().unwrap() * (hit - p);
+            debug_assert!(proj.z.abs() < 0.1);
+            proj.xy().into()
         }
 
-        // Quadratic case
-        let w = (k1 * k1 - 4.0 * k0 * k2).max(0.0).sqrt();
-        let ik2 = 0.5 / k2;
-        let v = (-k1 - w) * ik2;
-        let u = (h[i] - f[i] * v) / (e[i] + g[i] * v);
-        if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
-            na::Point2::new(u, v)
+        let left = project(&self.a, self.d - self.c, self.c - self.a, dir);
+        let result = if left.x <= left.y {
+            left
         } else {
-            // Other quadratic solution
-            let v = (-k1 + w) * ik2;
-            let u = (h[i] - f[i] * v) / (e[i] + g[i] * v);
-            na::Point2::new(u, v)
-        }
+            project(&self.a, self.b - self.a, self.d - self.b, dir)
+        };
+        debug_assert!(
+            result.iter().all(|&x| x > -0.1 && x < 1.1),
+            "projection {:?} out of range",
+            result
+        );
+        result.map(|x| x.clamp(0.0, 1.0))
     }
 }
 
@@ -1349,8 +1356,8 @@ mod tests {
                 true,
             )
             .expect("hit not found");
-        assert_relative_eq!(hit.toi, DISTANCE, epsilon = 1e-4);
-        assert_relative_eq!(hit.normal, Vector::x_axis(), epsilon = 1e-4);
+        assert_relative_eq!(hit.toi, DISTANCE, epsilon = 1e-3);
+        assert_relative_eq!(hit.normal, Vector::x_axis(), epsilon = 1e-3);
 
         let hit = planet.cast_local_ray_and_get_normal(
             &Ray {
