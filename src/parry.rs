@@ -129,22 +129,15 @@ impl Planet {
         bounds: &BoundingSphere,
         mut f: impl FnMut(&Coords, SlotId, u32, &Triangle) -> bool,
     ) {
-        let quad_resolution = self.chunk_resolution - 1;
         let dir = bounds.center().coords;
         let distance = dir.norm();
         let cache = &mut *self.cache.lock().unwrap();
-        // Iterate over each nearby quad
-        'outer: for quad_coords in Coords::neighborhood(
-            self.terrain.face_resolution() * quad_resolution,
+        // Iterate over each overlapping chunk
+        'outer: for chunk_coords in Coords::neighborhood(
+            self.terrain.face_resolution(),
             dir.cast(),
             bounds.radius().atan2(distance) as f32,
         ) {
-            // Coordinates of the chunk containing the quad
-            let chunk_coords = Coords {
-                x: quad_coords.x / quad_resolution,
-                y: quad_coords.y / quad_resolution,
-                face: quad_coords.face,
-            };
             let (slot, data) = cache.get(self, &chunk_coords);
             if self.radius as f64 + data.max as f64 + bounds.radius() < distance
                 || self.radius as f64 + data.min as f64 - bounds.radius() > distance
@@ -152,40 +145,15 @@ impl Planet {
                 // Short-circuit if `other` is way above or below this chunk
                 continue;
             }
-            let quad = na::Point2::new(
-                quad_coords.x % quad_resolution,
-                quad_coords.y % quad_resolution,
-            );
-            let quad_index = quad.y * self.chunk_resolution + quad.x;
-            for tri in 0..2 {
-                let index = (quad_index << 1) | tri;
-                let triangle =
-                    self.triangle(&chunk_coords, &data.samples, quad.x, quad.y, tri != 0);
+            let patch = Patch::new(&chunk_coords, self.terrain.face_resolution());
+            // TODO: Patch-level short circuit?
+            for (index, triangle) in
+                patch.triangles(self.radius as f64, self.chunk_resolution, &data.samples)
+            {
                 if !f(&chunk_coords, slot, index, &triangle) {
                     break 'outer;
                 }
             }
-        }
-    }
-
-    fn triangle(&self, coords: &Coords, samples: &[f32], x: u32, y: u32, left: bool) -> Triangle {
-        let quad_resolution = (self.chunk_resolution - 1) as f64;
-        let vertex = |x, y| {
-            let height = samples[(y * self.chunk_resolution + x) as usize];
-            let unit_coords =
-                na::Point2::new(x as f64 / quad_resolution, y as f64 / quad_resolution);
-            let dir = coords.direction(self.terrain.face_resolution(), &unit_coords);
-            na::Point3::from(dir.into_inner() * (self.radius as f64 + height as f64))
-        };
-
-        let p0 = vertex(x, y);
-        let p1 = vertex(x + 1, y);
-        let p2 = vertex(x + 1, y + 1);
-        let p3 = vertex(x, y + 1);
-        if left {
-            Triangle::new(p0, p1, p2)
-        } else {
-            Triangle::new(p2, p3, p0)
         }
     }
 }
@@ -254,22 +222,6 @@ impl RayCast for Planet {
     }
 }
 
-/// Find the edge of `chunk` crossed by a ray from `origin` towards `direction`, if any. Assumes
-/// that `ray` passes through the cone defined by `chunk`.
-fn raycast_edges(
-    resolution: u32,
-    chunk: &Coords,
-    ray: &Ray,
-    max_toi: Real,
-) -> Option<(Edge, Real)> {
-    let quad = [[0, 0], [1, 0], [0, 1], [1, 1]].map(|coords| {
-        chunk
-            .direction(resolution, &na::Point2::from(coords).cast::<f64>())
-            .into_inner()
-    });
-    raycast_quad_edges(ray, &quad, max_toi)
-}
-
 /// `quad` is row-major vectors from the origin
 fn raycast_quad_edges(
     ray: &Ray,
@@ -327,9 +279,10 @@ impl PointQuery for Planet {
         let distance2 = |x: &na::Point3<f64>| na::distance_squared(x, pt);
         let cache = &mut *self.cache.lock().unwrap();
         let (slot, data) = cache.get(self, &coords);
-        let (idx, nearest) = ChunkTriangles::new(self, coords, &data.samples)
-            .map(|tri| tri.project_local_point(pt, false))
-            .enumerate()
+        let patch = Patch::new(&coords, self.terrain.face_resolution());
+        let (idx, nearest) = patch
+            .triangles(self.radius, self.chunk_resolution, &data.samples)
+            .map(|(i, tri)| (i, tri.project_local_point(pt, false)))
             .min_by(|(_, x), (_, y)| {
                 distance2(&x.point)
                     .partial_cmp(&distance2(&y.point))
@@ -375,51 +328,6 @@ impl Shape for Planet {
 
     fn clone_box(&self) -> Box<dyn Shape> {
         Box::new(self.clone())
-    }
-}
-
-#[derive(Clone)]
-struct ChunkTriangles<'a> {
-    planet: &'a Planet,
-    samples: &'a [f32],
-    coords: Coords,
-    /// LSB identifies the triangle within a quad, remaining bits identify a quad by position in the
-    /// row-major sequence
-    index: u32,
-}
-
-impl<'a> ChunkTriangles<'a> {
-    fn new(planet: &'a Planet, coords: Coords, samples: &'a [f32]) -> Self {
-        Self {
-            planet,
-            samples,
-            coords,
-            index: 0,
-        }
-    }
-
-    fn get(&self) -> Triangle {
-        let quad_index = self.index >> 1;
-        let quad_resolution = self.planet.chunk_resolution - 1;
-        let y = quad_index / quad_resolution;
-        let x = quad_index % quad_resolution;
-        let left = (self.index & 1) == 0;
-        self.planet.triangle(&self.coords, self.samples, x, y, left)
-    }
-}
-
-impl Iterator for ChunkTriangles<'_> {
-    type Item = Triangle;
-    fn next(&mut self) -> Option<Triangle> {
-        // Number of quads along a chunk edge
-        let quad_resolution = self.planet.chunk_resolution - 1;
-        // Two triangles per quad
-        if self.index == quad_resolution * quad_resolution * 2 {
-            return None;
-        }
-        let tri = self.get();
-        self.index += 1;
-        Some(tri)
     }
 }
 
@@ -1118,9 +1026,28 @@ impl Patch {
         );
         result.map(|x| x.clamp(0.0, 1.0))
     }
+
+    fn triangles<'a>(
+        &'a self,
+        radius: f64,
+        chunk_resolution: u32,
+        samples: &'a [f32],
+    ) -> impl Iterator<Item = (u32, Triangle)> + 'a {
+        let quad_resolution = chunk_resolution - 1;
+        (0..quad_resolution).flat_map(move |y| {
+            (0..quad_resolution).flat_map(move |x| {
+                let quad_index = y * chunk_resolution + x;
+                Quad::new(self, quad_resolution, [x, y].into())
+                    .triangles(radius, chunk_resolution, samples)
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(i, tri)| ((quad_index << 1) | i as u32, tri))
+            })
+        })
+    }
 }
 
-/// Identifies a pair of triangles
+/// Identifies a pair of triangles within a patch
 struct Quad {
     /// Row-major order
     corners: [na::Vector3<f64>; 4],
@@ -1128,6 +1055,17 @@ struct Quad {
 }
 
 impl Quad {
+    fn new(patch: &Patch, resolution: u32, position: na::Point2<u32>) -> Self {
+        let offsets = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        Self {
+            corners: offsets.map(|x| {
+                patch
+                    .get(&((position.cast::<f64>() + na::Vector2::from(x)) / f64::from(resolution)))
+            }),
+            position,
+        }
+    }
+
     fn displace(
         &self,
         radius: f64,
@@ -1172,19 +1110,15 @@ fn walk_patch(
     max_toi: f64,
     mut f: impl FnMut(&Quad) -> bool,
 ) -> Option<(Edge, f64)> {
-    let quad_resolution = quad_resolution as f64;
+    let quad_resolution_f = quad_resolution as f64;
     let start = patch.project(&ray.origin.coords);
     let mut quad = start.map(|x| {
-        (x * quad_resolution)
+        (x * quad_resolution_f)
             .trunc()
-            .clamp(0.0, quad_resolution - 1.0)
+            .clamp(0.0, quad_resolution_f - 1.0)
     });
-    let offsets = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
     loop {
-        let candidate = Quad {
-            corners: offsets.map(|x| patch.get(&((quad + na::Vector2::from(x)) / quad_resolution))),
-            position: quad.map(|x| x as u32),
-        };
+        let candidate = Quad::new(&patch, quad_resolution, quad.map(|x| x as u32));
         if !f(&candidate) {
             return None;
         }
@@ -1193,7 +1127,11 @@ fn walk_patch(
             return None;
         };
         quad += edge.direction().into_inner();
-        if quad.x >= quad_resolution || quad.y >= quad_resolution || quad.x < 0.0 || quad.y < 0.0 {
+        if quad.x >= quad_resolution_f
+            || quad.y >= quad_resolution_f
+            || quad.x < 0.0
+            || quad.y < 0.0
+        {
             // Reached the edge of the patch
             return Some((edge, toi));
         }
@@ -1218,10 +1156,15 @@ mod tests {
             face: Face::Pz,
         };
         let samples = planet.sample(&coords);
-        let tris = ChunkTriangles::new(&planet, coords, &samples[..]);
-        assert_eq!(tris.clone().count(), 2);
+        let patch = Patch::new(&coords, planet.terrain.face_resolution());
+        assert_eq!(
+            patch
+                .triangles(planet.radius, planet.chunk_resolution, &samples)
+                .count(),
+            2
+        );
         let expected = 1.0 / 3.0f64.sqrt();
-        for tri in tris {
+        for (_, tri) in patch.triangles(planet.radius, planet.chunk_resolution, &samples) {
             assert!(tri.normal().unwrap().z > 0.0);
             for vert in &[tri.a, tri.b, tri.c] {
                 assert!(vert.z > 0.0);
