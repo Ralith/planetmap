@@ -146,12 +146,16 @@ impl Planet {
                 continue;
             }
             let patch = Patch::new(&chunk_coords, self.terrain.face_resolution());
-            // TODO: Patch-level short circuit?
-            for (index, triangle) in
-                patch.triangles(self.radius as f64, self.chunk_resolution, &data.samples)
-            {
-                if !f(&chunk_coords, slot, index, &triangle) {
-                    break 'outer;
+            for quad in patch.quads(self.chunk_resolution) {
+                if !quad.may_intersect(bounds) {
+                    continue;
+                }
+                for (index, triangle) in
+                    quad.triangles(self.radius as f64, self.chunk_resolution, &data.samples)
+                {
+                    if !f(&chunk_coords, slot, index, &triangle) {
+                        break 'outer;
+                    }
                 }
             }
         }
@@ -1089,6 +1093,38 @@ impl Quad {
         DisplacedQuad {
             corners: result.map(na::Point3::from),
         }
+    }
+
+    /// The half-spaces that bound the possible surfaces for this quad, in order -X, -Y, +X, +Y
+    fn frustum(&self) -> [HalfSpace; 4] {
+        let [a, b, c, d] = &self.corners;
+        let edges: [[&na::Vector3<f64>; 2]; 4] = [[c, a], [a, b], [b, d], [d, c]];
+
+        edges.map(|[v1, v2]| HalfSpace {
+            normal: na::Unit::new_normalize(v1.cross(&v2)),
+        })
+    }
+
+    fn may_intersect(&self, bounds: &BoundingSphere) -> bool {
+        // A sphere lies within the intersection of a set of halfspaces iff it is less than one
+        // radius behind each
+        self.frustum()
+            .into_iter()
+            .all(|plane| plane.distance_to_local_point(&bounds.center, false) > -bounds.radius)
+    }
+
+    fn triangles<'a>(
+        &'a self,
+        radius: f64,
+        chunk_resolution: u32,
+        samples: &'a [f32],
+    ) -> impl Iterator<Item = (u32, Triangle)> + 'a {
+        let index = self.index(chunk_resolution);
+        self.displace(radius, chunk_resolution, samples)
+            .triangles()
+            .into_iter()
+            .enumerate()
+            .map(move |(i, tri)| ((index << 1) | i as u32, tri))
     }
 }
 
