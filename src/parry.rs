@@ -191,7 +191,9 @@ impl RayCast for Planet {
 
             let mut maybe_hit = None;
             let edge = walk_patch(self.chunk_resolution - 1, &patch, &ray, max_toi, |quad| {
-                let tris = quad.triangles(self.radius, self.chunk_resolution, &data.samples);
+                let tris = quad
+                    .displace(self.radius, self.chunk_resolution, &data.samples)
+                    .triangles();
                 let Some((tri, mut hit)) = tris.into_iter()
                     .enumerate()
                     .filter_map(|(i, t)| Some((i, t.cast_local_ray_and_get_normal(&ray, max_toi, solid)?)))
@@ -1027,22 +1029,26 @@ impl Patch {
         result.map(|x| x.clamp(0.0, 1.0))
     }
 
+    fn quads<'a>(&'a self, chunk_resolution: u32) -> impl Iterator<Item = Quad> + 'a {
+        let quad_resolution = chunk_resolution - 1;
+        (0..quad_resolution).flat_map(move |y| {
+            (0..quad_resolution).map(move |x| Quad::new(self, quad_resolution, [x, y].into()))
+        })
+    }
+
     fn triangles<'a>(
         &'a self,
         radius: f64,
         chunk_resolution: u32,
         samples: &'a [f32],
     ) -> impl Iterator<Item = (u32, Triangle)> + 'a {
-        let quad_resolution = chunk_resolution - 1;
-        (0..quad_resolution).flat_map(move |y| {
-            (0..quad_resolution).flat_map(move |x| {
-                let quad_index = y * chunk_resolution + x;
-                Quad::new(self, quad_resolution, [x, y].into())
-                    .triangles(radius, chunk_resolution, samples)
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(i, tri)| ((quad_index << 1) | i as u32, tri))
-            })
+        self.quads(chunk_resolution).flat_map(move |quad| {
+            let index = quad.index(chunk_resolution);
+            quad.displace(radius, chunk_resolution, samples)
+                .triangles()
+                .into_iter()
+                .enumerate()
+                .map(move |(i, tri)| ((index << 1) | i as u32, tri))
         })
     }
 }
@@ -1066,12 +1072,11 @@ impl Quad {
         }
     }
 
-    fn displace(
-        &self,
-        radius: f64,
-        chunk_resolution: u32,
-        chunk_samples: &[f32],
-    ) -> [na::Vector3<f64>; 4] {
+    fn index(&self, chunk_resolution: u32) -> u32 {
+        self.position.y * chunk_resolution + self.position.x
+    }
+
+    fn displace(&self, radius: f64, chunk_resolution: u32, chunk_samples: &[f32]) -> DisplacedQuad {
         let offsets = [[0, 0], [1, 0], [0, 1], [1, 1]];
         let mut result = self.corners;
         for (v, offset) in result.iter_mut().zip(offsets) {
@@ -1081,18 +1086,20 @@ impl Quad {
             // subdivided patch, not the surface of the sphere directly.
             *v = *v * radius + v.normalize() * f64::from(displacement);
         }
-        result
+        DisplacedQuad {
+            corners: result.map(na::Point3::from),
+        }
     }
+}
 
-    fn triangles(
-        &self,
-        radius: f64,
-        chunk_resolution: u32,
-        chunk_samples: &[f32],
-    ) -> [Triangle; 2] {
-        let [p0, p1, p2, p3] = self
-            .displace(radius, chunk_resolution, chunk_samples)
-            .map(na::Point3::from);
+struct DisplacedQuad {
+    /// Row-major order
+    corners: [na::Point3<f64>; 4],
+}
+
+impl DisplacedQuad {
+    fn triangles(&self) -> [Triangle; 2] {
+        let [p0, p1, p2, p3] = self.corners;
         [Triangle::new(p0, p1, p3), Triangle::new(p3, p2, p0)]
     }
 }
