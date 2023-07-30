@@ -1205,25 +1205,24 @@ mod tests {
             17,
         );
 
-        assert!(ball_contacts(&planet, Point::new(2.0, PLANET_RADIUS as f64, 0.0), 1.0) > 1);
+        // We add 0.1 to PLANET_RADIUS in positive tests below to hack around the issue in
+        // https://github.com/dimforge/parry/pull/148. Can be removed once fix is released.
+        assert!(ball_contacts(&planet, Point::new(2.0, PLANET_RADIUS + 0.1, 0.0), 1.0) >= 2,
+                "a ball lying on an axis of a planet with an even number of chunks per face overlaps with at least four triangles");
         assert_eq!(
-            ball_contacts(
-                &planet,
-                Point::new(0.0, PLANET_RADIUS as f64 + 2.0, 0.0),
-                1.0
-            ),
+            ball_contacts(&planet, Point::new(0.0, PLANET_RADIUS + 2.0, 0.0), 1.0),
             0
         );
-        assert!(ball_contacts(&planet, Point::new(-1.0, PLANET_RADIUS as f64, 0.0), 1.0) > 0);
+        assert!(ball_contacts(&planet, Point::new(-1.0, PLANET_RADIUS + 0.1, 0.0), 1.0) > 0);
 
-        for i in 1..10 {
+        for i in 0..10 {
             use std::f64;
             let rot = na::UnitQuaternion::from_axis_angle(
                 &na::Vector3::z_axis(),
                 (i as f64 / 1000.0) * f64::consts::PI * 1e-4,
             );
-            let pos = Point::from(rot * na::Vector3::new(0.0, PLANET_RADIUS as f64, 0.0));
-            assert!(ball_contacts(&planet, pos, 1.0) > 0);
+            let pos = Point::from(rot * na::Vector3::new(0.0, PLANET_RADIUS + 0.1, 0.0));
+            assert!(ball_contacts(&planet, dbg!(pos), 1.0) > 0);
         }
     }
 
