@@ -127,6 +127,7 @@ impl Planet {
     pub fn map_elements_in_local_sphere(
         &self,
         bounds: &BoundingSphere,
+        aabb: &Aabb,
         mut f: impl FnMut(&Coords, SlotId, u32, &Triangle) -> bool,
     ) {
         let dir = bounds.center().coords;
@@ -146,10 +147,7 @@ impl Planet {
                 continue;
             }
             let patch = Patch::new(&chunk_coords, self.terrain.face_resolution());
-            for quad in patch.quads(self.chunk_resolution) {
-                if !quad.may_intersect(bounds) {
-                    continue;
-                }
+            for quad in patch.quads_within(&aabb, self.chunk_resolution) {
                 for (index, triangle) in
                     quad.triangles(self.radius as f64, self.chunk_resolution, &data.samples)
                 {
@@ -530,8 +528,9 @@ fn intersects(pos12: &Isometry<Real>, planet: &Planet, other: &dyn Shape) -> boo
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
     let bounds = other.compute_bounding_sphere(pos12);
+    let aabb = other.compute_aabb(pos12);
     let mut intersects = false;
-    planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
+    planet.map_elements_in_local_sphere(&bounds, &aabb, |_, _, _, triangle| {
         intersects = dispatcher
             .intersection_test(pos12, triangle, other)
             .unwrap_or(false);
@@ -552,13 +551,13 @@ fn compute_toi(
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
     // TODO: Raycast vs. minkowski sum of chunk bounds and bounding sphere?
-    let bounds = {
+    let aabb = {
         let start = other.compute_aabb(pos12);
         let end = start.transform_by(&Isometry::from_parts((max_toi * vel12).into(), na::one()));
-        start.merged(&end).bounding_sphere()
+        start.merged(&end)
     };
     let mut closest = None::<TOI>;
-    planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
+    planet.map_elements_in_local_sphere(&aabb.bounding_sphere(), &aabb, |_, _, _, triangle| {
         let impact = if flipped {
             dispatcher.time_of_impact(
                 &pos12.inverse(),
@@ -597,17 +596,17 @@ fn compute_nonlinear_toi(
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
     // TODO: Select chunks/triangles more conservatively, as discussed in compute_toi
-    let bounds = {
+    let aabb = {
         let start_pos = motion_planet.position_at_time(start_time).inverse()
             * motion_other.position_at_time(start_time);
         let end_pos = motion_planet.position_at_time(end_time).inverse()
             * motion_other.position_at_time(end_time);
         let start = other.compute_aabb(&start_pos);
         let end = other.compute_aabb(&end_pos);
-        start.merged(&end).bounding_sphere()
+        start.merged(&end)
     };
     let mut closest = None::<TOI>;
-    planet.map_elements_in_local_sphere(&bounds, |_, _, _, triangle| {
+    planet.map_elements_in_local_sphere(&aabb.bounding_sphere(), &aabb, |_, _, _, triangle| {
         let impact = if flipped {
             dispatcher.nonlinear_time_of_impact(
                 motion_other,
@@ -737,8 +736,9 @@ fn compute_manifolds<ManifoldData, ContactData>(
     let phase = workspace.phase;
 
     let bounds = other.compute_bounding_sphere(pos12).loosened(prediction);
+    let aabb = other.compute_aabb(pos12).loosened(prediction);
     let mut old_manifolds = std::mem::take(manifolds);
-    planet.map_elements_in_local_sphere(&bounds, |&coords, slot, index, triangle| {
+    planet.map_elements_in_local_sphere(&bounds, &aabb, |&coords, slot, index, triangle| {
         let tri_state = match workspace.state.entry((coords, index)) {
             hash_map::Entry::Occupied(e) => {
                 let tri_state = e.into_mut();
@@ -843,8 +843,9 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
         .bounding_sphere()
         .transform_by(pos12)
         .loosened(prediction);
+    let aabb = bvh.root_aabb().transform_by(pos12).loosened(prediction);
     let mut old_manifolds = std::mem::take(manifolds);
-    planet.map_elements_in_local_sphere(&bounds, |&coords, slot, index, triangle| {
+    planet.map_elements_in_local_sphere(&bounds, &aabb, |&coords, slot, index, triangle| {
         let tri_aabb = triangle.compute_aabb(pos21).loosened(prediction);
 
         let mut visit = |&composite_subshape: &u32| {
@@ -1004,19 +1005,12 @@ impl Patch {
             y: na::Vector3<f64>,
             dir: &na::Vector3<f64>,
         ) -> na::Point2<f64> {
-            // Intersect dir with triangle's plane
-            let z = x.cross(&y);
-            let d = p.dot(&z) / dir.dot(&z);
-            let hit = dir * d;
-
-            // Basis of triangle space
-            let m = na::Matrix3::from_columns(&[x, y, z]);
-            // Project hit point into triangle space. Could simplify `try_inverse()` by inlining
-            // analytic inversion and dropping the Z row, but the optimizer probably does that for
-            // us.
-            let proj = m.try_inverse().unwrap() * (hit - p);
-            debug_assert!(proj.z.abs() < 0.1);
-            proj.xy().into()
+            // t * dir = p + u * x + v * y
+            // -p = x * u + y * v - t * dir
+            //    = [x y dir] [u v -t]^T
+            // [u v -t]^T = [x y dir]^-1 . -p
+            let m = na::Matrix3::from_columns(&[x, y, *dir]);
+            (m.try_inverse().unwrap().fixed_view::<2, 3>(0, 0) * -p).into()
         }
 
         let left = project(&self.a, self.d - self.c, self.c - self.a, dir);
@@ -1025,11 +1019,6 @@ impl Patch {
         } else {
             project(&self.a, self.b - self.a, self.d - self.b, dir)
         };
-        debug_assert!(
-            result.iter().all(|&x| x > -0.1 && x < 1.1),
-            "projection {:?} out of range",
-            result
-        );
         result.map(|x| x.clamp(0.0, 1.0))
     }
 
@@ -1038,6 +1027,42 @@ impl Patch {
         (0..quad_resolution).flat_map(move |y| {
             (0..quad_resolution).map(move |x| Quad::new(self, quad_resolution, [x, y].into()))
         })
+    }
+
+    fn quads_within<'a>(
+        &'a self,
+        aabb: &Aabb,
+        chunk_resolution: u32,
+    ) -> impl Iterator<Item = Quad> + 'a {
+        self.quads_within_inner(aabb, chunk_resolution)
+            .into_iter()
+            .flatten()
+    }
+
+    fn quads_within_inner<'a>(
+        &'a self,
+        aabb: &Aabb,
+        chunk_resolution: u32,
+    ) -> Option<impl Iterator<Item = Quad> + 'a> {
+        let verts = aabb.vertices();
+        let v0 = self.project(&verts[0].coords).coords;
+        let (lower, upper) = verts[1..]
+            .iter()
+            .map(|v| self.project(&v.coords).coords)
+            .fold((v0, v0), |(lower, upper), p| {
+                (lower.zip_map(&p, f64::min), upper.zip_map(&p, f64::max))
+            });
+        if lower.iter().any(|&v| v == 1.0) || upper.iter().any(|&v| v == 0.0) {
+            return None;
+        }
+        let quad_resolution = chunk_resolution - 1;
+        let discretize = |x: f64| ((x * quad_resolution as f64) as u32).min(quad_resolution - 1);
+        // FIXME: wrong units! Reuse bounding
+        let lower = lower.map(discretize);
+        let upper = upper.map(discretize);
+        Some((lower.y..=upper.y).flat_map(move |y| {
+            (lower.x..=upper.x).map(move |x| Quad::new(self, quad_resolution, [x, y].into()))
+        }))
     }
 
     fn triangles<'a>(
@@ -1093,24 +1118,6 @@ impl Quad {
         DisplacedQuad {
             corners: result.map(na::Point3::from),
         }
-    }
-
-    /// The half-spaces that bound the possible surfaces for this quad, in order -X, -Y, +X, +Y
-    fn frustum(&self) -> [HalfSpace; 4] {
-        let [a, b, c, d] = &self.corners;
-        let edges: [[&na::Vector3<f64>; 2]; 4] = [[c, a], [a, b], [b, d], [d, c]];
-
-        edges.map(|[v1, v2]| HalfSpace {
-            normal: na::Unit::new_normalize(v1.cross(&v2)),
-        })
-    }
-
-    fn may_intersect(&self, bounds: &BoundingSphere) -> bool {
-        // A sphere lies within the intersection of a set of halfspaces iff it is less than one
-        // radius behind each
-        self.frustum()
-            .into_iter()
-            .all(|plane| plane.distance_to_local_point(&bounds.center, false) > -bounds.radius)
     }
 
     fn triangles<'a>(
