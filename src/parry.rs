@@ -997,8 +997,10 @@ impl Patch {
     }
 
     /// Map a direction in sphere space to a point in patch space
+    #[inline(always)]
     fn project(&self, dir: &na::Vector3<f64>) -> na::Point2<f64> {
         // Project onto each triangle, then select the in-bounds result
+        #[inline(always)]
         fn project(
             p: &na::Vector3<f64>,
             x: na::Vector3<f64>,
@@ -1010,7 +1012,7 @@ impl Patch {
             //    = [x y dir] [u v -t]^T
             // [u v -t]^T = [x y dir]^-1 . -p
             let m = na::Matrix3::from_columns(&[x, y, *dir]);
-            (m.try_inverse().unwrap().fixed_view::<2, 3>(0, 0) * -p).into()
+            (-(m.try_inverse().unwrap().fixed_view::<2, 3>(0, 0) * p)).into()
         }
 
         let left = project(&self.a, self.d - self.c, self.c - self.a, dir);
