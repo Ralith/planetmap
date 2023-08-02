@@ -32,12 +32,11 @@ When generating geometry to be displaced by the heightmap, care must
 be taken to ensure numerical stability and avoid hairline cracks
 between neighboring chunks. One effective tactic is to upload the
 corners of each chunk from the CPU, then find interior points using
-interpolation in a vertex shader, accounting for curvature using the
-law of sines.
+interpolation in a vertex shader.
 
 ## Features
 
-- `ncollide` exposes helpers for nphysics-compatible collision
+- `parry` exposes helpers for rapier-compatible collision
   detection against the surface of a radial heightmap
 - `simd` exposes `simdeez`-based iterators for data-parallel
   computation of sample coordinates within a `Chunk` or
