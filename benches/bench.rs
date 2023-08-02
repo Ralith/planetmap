@@ -67,10 +67,9 @@ fn collision(c: &mut Criterion) {
     const PLANET_RADIUS: f64 = 6371e3;
     let ball = Ball { radius: 1.0 };
     let planet = Planet::new(
-        Arc::new(FlatTerrain::new(2u32.pow(12))),
+        Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
         32,
         PLANET_RADIUS,
-        17,
     );
 
     c.bench_function("intersect", |b| {

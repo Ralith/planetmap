@@ -30,24 +30,31 @@ use crate::{
 /// Height data source for `Planet`
 pub trait Terrain: Send + Sync + 'static {
     /// Generate a `resolution * resolution` grid of heights wrt. sea level
-    fn sample(&self, resolution: u32, coords: &Coords, out: &mut [f32]);
-    /// Number of blocks of samples along the edge of a cubemap face
+    fn sample(&self, coords: &Coords, out: &mut [f32]);
+    /// Number of blocks of samples (chunks) along the edge of a cubemap face
     fn face_resolution(&self) -> u32;
+    /// Number of samples along the edge of a single chunk. `sample` will be supplied buffers sized
+    /// based for this. Must be at least 2.
+    fn chunk_resolution(&self) -> u32;
     /// The maximum value that will ever be written by `sample`
     fn max_height(&self) -> f32;
     /// The minimum value that will ever be written by `sample`
     fn min_height(&self) -> f32;
 }
 
-/// Perfect sphere `Terrain` impl
+/// Trivial `Terrain` impl
 #[derive(Debug, Copy, Clone)]
 pub struct FlatTerrain {
     face_resolution: u32,
+    chunk_resolution: u32,
 }
 
 impl FlatTerrain {
-    pub fn new(face_resolution: u32) -> Self {
-        Self { face_resolution }
+    pub fn new(face_resolution: u32, chunk_resolution: u32) -> Self {
+        Self {
+            face_resolution,
+            chunk_resolution,
+        }
     }
 }
 
@@ -55,6 +62,11 @@ impl Terrain for FlatTerrain {
     fn face_resolution(&self) -> u32 {
         self.face_resolution
     }
+
+    fn chunk_resolution(&self) -> u32 {
+        self.chunk_resolution
+    }
+
     fn max_height(&self) -> f32 {
         0.0
     }
@@ -62,7 +74,7 @@ impl Terrain for FlatTerrain {
         0.0
     }
 
-    fn sample(&self, _: u32, _: &Coords, out: &mut [f32]) {
+    fn sample(&self, _: &Coords, out: &mut [f32]) {
         for x in out {
             *x = 0.0;
         }
@@ -86,18 +98,11 @@ impl Planet {
     /// `terrain` - source of height samples
     /// `cache_size` - maximum number of chunks of height data to keep in memory
     /// `radius` - distance from origin of points with height 0
-    /// `chunk_resolution` - number of heightfield samples along the edge of a chunk
-    pub fn new(
-        terrain: Arc<dyn Terrain>,
-        cache_size: u32,
-        radius: f64,
-        chunk_resolution: u32,
-    ) -> Self {
-        assert!(chunk_resolution > 1, "chunks must be at least 2x2");
+    pub fn new(terrain: Arc<dyn Terrain>, cache_size: u32, radius: f64) -> Self {
         Self {
+            chunk_resolution: terrain.chunk_resolution(),
             terrain,
             radius,
-            chunk_resolution,
             cache: Mutex::new(Cache::new(cache_size)),
         }
     }
@@ -113,8 +118,7 @@ impl Planet {
         let mut samples =
             vec![0.0; self.chunk_resolution as usize * self.chunk_resolution as usize]
                 .into_boxed_slice();
-        self.terrain
-            .sample(self.chunk_resolution, coords, &mut samples[..]);
+        self.terrain.sample(coords, &mut samples[..]);
         samples
     }
 
@@ -1201,7 +1205,7 @@ mod tests {
 
     #[test]
     fn triangles() {
-        let planet = Planet::new(Arc::new(FlatTerrain::new(1)), 32, 1.0, 2);
+        let planet = Planet::new(Arc::new(FlatTerrain::new(1, 2)), 32, 1.0);
         let coords = Coords {
             x: 0,
             y: 0,
@@ -1251,10 +1255,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
 
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
 
         // We add 0.1 to PLANET_RADIUS in positive tests below to hack around the issue in
@@ -1285,10 +1288,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
         const BALL_RADIUS: f64 = 50.0;
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
 
         let pos = Point::from(
@@ -1305,10 +1307,9 @@ mod tests {
         const DISTANCE: f64 = 10.0;
         let ball = Ball { radius: 1.0 };
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
 
         let impact = PlanetDispatcher
@@ -1335,10 +1336,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
         const DISTANCE: f64 = 10.0;
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
         let hit = planet
             .cast_local_ray_and_get_normal(
@@ -1369,10 +1369,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
         const DISTANCE: f64 = 10.0;
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
 
         for &dir in [Vector::x(), Vector::y(), -Vector::x(), -Vector::y()].iter() {
@@ -1393,10 +1392,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
         const DISTANCE: f64 = 1000.0;
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
         planet
             .cast_local_ray_and_get_normal(
@@ -1415,10 +1413,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
         let ball = Ball { radius: 1.0 };
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
 
         assert!(PlanetDispatcher
@@ -1442,10 +1439,9 @@ mod tests {
         const PLANET_RADIUS: f64 = 6371e3;
         let ball = Ball { radius: 1.0 };
         let planet = Planet::new(
-            Arc::new(FlatTerrain::new(2u32.pow(12))),
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
             32,
             PLANET_RADIUS,
-            17,
         );
 
         let toi = PlanetDispatcher
