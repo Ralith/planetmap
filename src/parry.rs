@@ -140,16 +140,16 @@ impl Planet {
             bounds.radius().atan2(distance) as f32,
         ) {
             let (slot, data) = cache.get(self, &chunk_coords);
-            if self.radius as f64 + data.max as f64 + bounds.radius() < distance
-                || self.radius as f64 + data.min as f64 - bounds.radius() > distance
+            if self.radius + data.max as f64 + bounds.radius() < distance
+                || self.radius + data.min as f64 - bounds.radius() > distance
             {
                 // Short-circuit if `other` is way above or below this chunk
                 continue;
             }
             let patch = Patch::new(&chunk_coords, self.terrain.face_resolution());
-            for quad in patch.quads_within(&aabb, self.chunk_resolution) {
+            for quad in patch.quads_within(aabb, self.chunk_resolution) {
                 for (index, triangle) in
-                    quad.triangles(self.radius as f64, self.chunk_resolution, &data.samples)
+                    quad.triangles(self.radius, self.chunk_resolution, &data.samples)
                 {
                     if !f(&chunk_coords, slot, index, &triangle) {
                         break 'outer;
@@ -205,7 +205,7 @@ impl RayCast for Planet {
                 };
                 let quad_index = quad.position.y * self.chunk_resolution + quad.position.x;
                 let index = (quad_index << 1) | tri as u32;
-                hit.feature = FeatureId::Face(self.feature_id(slot, index as u32));
+                hit.feature = FeatureId::Face(self.feature_id(slot, index));
                 maybe_hit = Some(hit);
                 false
             });
@@ -243,7 +243,7 @@ fn raycast_quad_edges(
     for &(edge, [v1, v2]) in edges.iter() {
         // Construct inward-facing edge planes
         let plane = HalfSpace {
-            normal: na::Unit::new_normalize(v1.cross(&v2)),
+            normal: na::Unit::new_normalize(v1.cross(v2)),
         };
         // Eliminate planes behind the ray
         if plane.normal.as_ref().dot(&ray.dir) >= 0.0 {
@@ -294,7 +294,7 @@ impl PointQuery for Planet {
             })
             .unwrap();
         // TODO: Check neighborhood, so we don't miss as many cliff faces
-        (nearest, FeatureId::Face(self.feature_id(slot, idx as u32)))
+        (nearest, FeatureId::Face(self.feature_id(slot, idx)))
     }
 }
 
@@ -726,7 +726,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
     ContactData: Default + Copy,
 {
     let workspace = workspace
-        .get_or_insert_with(|| ContactManifoldsWorkspace(Box::new(Workspace::default())))
+        .get_or_insert_with(|| ContactManifoldsWorkspace(Box::<Workspace>::default()))
         .0
         .downcast_mut::<Workspace>()
         .unwrap();
@@ -756,7 +756,7 @@ fn compute_manifolds<ManifoldData, ContactData>(
                     phase,
                 };
 
-                let id = planet.feature_id(slot, index) as u32;
+                let id = planet.feature_id(slot, index);
                 let (id1, id2) = if flipped { (0, id) } else { (id, 0) };
                 manifolds.push(ContactManifold::with_data(
                     id1,
@@ -827,7 +827,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     ContactData: Default + Copy,
 {
     let workspace = workspace
-        .get_or_insert_with(|| ContactManifoldsWorkspace(Box::new(WorkspaceVsComposite::default())))
+        .get_or_insert_with(|| ContactManifoldsWorkspace(Box::<WorkspaceVsComposite>::default()))
         .0
         .downcast_mut::<WorkspaceVsComposite>()
         .unwrap();
@@ -871,7 +871,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
                         }
                         hash_map::Entry::Vacant(e) => {
                             let mut manifold = ContactManifold::new();
-                            let id = planet.feature_id(slot, index) as u32;
+                            let id = planet.feature_id(slot, index);
                             if flipped {
                                 manifold.subshape1 = composite_subshape;
                                 manifold.subshape2 = id;
@@ -1024,7 +1024,7 @@ impl Patch {
         result.map(|x| x.clamp(0.0, 1.0))
     }
 
-    fn quads<'a>(&'a self, chunk_resolution: u32) -> impl Iterator<Item = Quad> + 'a {
+    fn quads(&self, chunk_resolution: u32) -> impl Iterator<Item = Quad> + '_ {
         let quad_resolution = chunk_resolution - 1;
         (0..quad_resolution).flat_map(move |y| {
             (0..quad_resolution).map(move |x| Quad::new(self, quad_resolution, [x, y].into()))
@@ -1170,7 +1170,7 @@ fn walk_patch(
             .clamp(0.0, quad_resolution_f - 1.0)
     });
     loop {
-        let candidate = Quad::new(&patch, quad_resolution, quad.map(|x| x as u32));
+        let candidate = Quad::new(patch, quad_resolution, quad.map(|x| x as u32));
         if !f(&candidate) {
             return None;
         }
