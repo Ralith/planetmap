@@ -13,10 +13,11 @@ use parry3d_f64::{
     mass_properties::MassProperties,
     math::{Isometry, Point, Real, Vector},
     query::{
-        visitors::BoundingVolumeIntersectionsVisitor, ClosestPoints, Contact, ContactManifold,
-        ContactManifoldsWorkspace, DefaultQueryDispatcher, NonlinearRigidMotion,
-        PersistentQueryDispatcher, PointProjection, PointQuery, QueryDispatcher, Ray, RayCast,
-        RayIntersection, TypedWorkspaceData, Unsupported, WorkspaceData, TOI,
+        details::NormalConstraints, visitors::BoundingVolumeIntersectionsVisitor, ClosestPoints,
+        Contact, ContactManifold, ContactManifoldsWorkspace, DefaultQueryDispatcher,
+        NonlinearRigidMotion, PersistentQueryDispatcher, PointProjection, PointQuery,
+        QueryDispatcher, Ray, RayCast, RayIntersection, ShapeCastHit, ShapeCastOptions,
+        TypedWorkspaceData, Unsupported, WorkspaceData,
     },
     shape::{FeatureId, HalfSpace, Shape, ShapeType, SimdCompositeShape, Triangle, TypedShape},
     utils::IsometryOpt,
@@ -200,10 +201,13 @@ impl RayCast for Planet {
                 let tris = quad
                     .displace(self.radius, self.chunk_resolution, &data.samples)
                     .triangles();
-                let Some((tri, mut hit)) = tris.into_iter()
+                let Some((tri, mut hit)) = tris
+                    .into_iter()
                     .enumerate()
-                    .filter_map(|(i, t)| Some((i, t.cast_local_ray_and_get_normal(&ray, max_toi, solid)?)))
-                    .min_by(|a, b| a.1.toi.total_cmp(&b.1.toi))
+                    .filter_map(|(i, t)| {
+                        Some((i, t.cast_local_ray_and_get_normal(&ray, max_toi, solid)?))
+                    })
+                    .min_by(|a, b| a.1.time_of_impact.total_cmp(&b.1.time_of_impact))
                 else {
                     return true;
                 };
@@ -323,7 +327,7 @@ impl Shape for Planet {
     }
 
     fn as_typed_shape(&self) -> TypedShape<'_> {
-        TypedShape::Custom(0)
+        TypedShape::Custom(self)
     }
 
     fn ccd_thickness(&self) -> Real {
@@ -334,8 +338,13 @@ impl Shape for Planet {
         0.0
     }
 
-    fn clone_box(&self) -> Box<dyn Shape> {
+    fn clone_dyn(&self) -> Box<dyn Shape> {
         Box::new(self.clone())
+    }
+
+    fn scale_dyn(&self, _scale: &Vector<Real>, _num_subdivisions: u32) -> Option<Box<dyn Shape>> {
+        // Non-uniform scale not supported
+        None
     }
 }
 
@@ -456,25 +465,16 @@ impl QueryDispatcher for PlanetDispatcher {
         Err(Unsupported)
     }
 
-    fn time_of_impact(
+    fn cast_shapes(
         &self,
         pos12: &Isometry<Real>,
         vel12: &Vector<Real>,
         g1: &dyn Shape,
         g2: &dyn Shape,
-        max_toi: Real,
-        stop_at_penetration: bool,
-    ) -> Result<Option<TOI>, Unsupported> {
+        options: ShapeCastOptions,
+    ) -> Result<Option<ShapeCastHit>, Unsupported> {
         if let Some(p1) = g1.downcast_ref::<Planet>() {
-            return Ok(compute_toi(
-                pos12,
-                vel12,
-                p1,
-                g2,
-                max_toi,
-                stop_at_penetration,
-                false,
-            ));
+            return Ok(compute_toi(pos12, vel12, p1, g2, options, false));
         }
         if let Some(p2) = g2.downcast_ref::<Planet>() {
             return Ok(compute_toi(
@@ -482,15 +482,14 @@ impl QueryDispatcher for PlanetDispatcher {
                 &-vel12,
                 p2,
                 g1,
-                max_toi,
-                stop_at_penetration,
+                options,
                 true,
             ));
         }
         Err(Unsupported)
     }
 
-    fn nonlinear_time_of_impact(
+    fn cast_shapes_nonlinear(
         &self,
         motion1: &NonlinearRigidMotion,
         g1: &dyn Shape,
@@ -499,7 +498,7 @@ impl QueryDispatcher for PlanetDispatcher {
         start_time: Real,
         end_time: Real,
         stop_at_penetration: bool,
-    ) -> Result<Option<TOI>, Unsupported> {
+    ) -> Result<Option<ShapeCastHit>, Unsupported> {
         if let Some(p1) = g1.downcast_ref::<Planet>() {
             return Ok(compute_nonlinear_toi(
                 motion1,
@@ -548,36 +547,31 @@ fn compute_toi(
     vel12: &Vector<Real>,
     planet: &Planet,
     other: &dyn Shape,
-    max_toi: Real,
-    stop_at_penetration: bool,
+    options: ShapeCastOptions,
     flipped: bool,
-) -> Option<TOI> {
+) -> Option<ShapeCastHit> {
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
     // TODO: Raycast vs. minkowski sum of chunk bounds and bounding sphere?
     let aabb = {
         let start = other.compute_aabb(pos12);
-        let end = start.transform_by(&Isometry::from_parts((max_toi * vel12).into(), na::one()));
+        let end = start.transform_by(&Isometry::from_parts(
+            (options.max_time_of_impact * vel12).into(),
+            na::one(),
+        ));
         start.merged(&end)
     };
-    let mut closest = None::<TOI>;
+    let mut closest = None::<ShapeCastHit>;
     planet.map_elements_in_local_sphere(&aabb.bounding_sphere(), &aabb, |_, _, _, triangle| {
         let impact = if flipped {
-            dispatcher.time_of_impact(
-                &pos12.inverse(),
-                &-vel12,
-                other,
-                triangle,
-                max_toi,
-                stop_at_penetration,
-            )
+            dispatcher.cast_shapes(&pos12.inverse(), &-vel12, other, triangle, options)
         } else {
-            dispatcher.time_of_impact(pos12, vel12, triangle, other, max_toi, stop_at_penetration)
+            dispatcher.cast_shapes(pos12, vel12, triangle, other, options)
         };
         if let Ok(Some(impact)) = impact {
             closest = Some(match closest {
                 None => impact,
-                Some(x) if impact.toi < x.toi => impact,
+                Some(x) if impact.time_of_impact < x.time_of_impact => impact,
                 Some(x) => x,
             });
         }
@@ -596,7 +590,7 @@ fn compute_nonlinear_toi(
     end_time: Real,
     stop_at_penetration: bool,
     flipped: bool,
-) -> Option<TOI> {
+) -> Option<ShapeCastHit> {
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
     // TODO: Select chunks/triangles more conservatively, as discussed in compute_toi
@@ -609,10 +603,10 @@ fn compute_nonlinear_toi(
         let end = other.compute_aabb(&end_pos);
         start.merged(&end)
     };
-    let mut closest = None::<TOI>;
+    let mut closest = None::<ShapeCastHit>;
     planet.map_elements_in_local_sphere(&aabb.bounding_sphere(), &aabb, |_, _, _, triangle| {
         let impact = if flipped {
-            dispatcher.nonlinear_time_of_impact(
+            dispatcher.cast_shapes_nonlinear(
                 motion_other,
                 other,
                 motion_planet,
@@ -622,7 +616,7 @@ fn compute_nonlinear_toi(
                 stop_at_penetration,
             )
         } else {
-            dispatcher.nonlinear_time_of_impact(
+            dispatcher.cast_shapes_nonlinear(
                 motion_planet,
                 triangle,
                 motion_other,
@@ -635,7 +629,7 @@ fn compute_nonlinear_toi(
         if let Ok(Some(impact)) = impact {
             closest = Some(match closest {
                 None => impact,
-                Some(x) if impact.toi < x.toi => impact,
+                Some(x) if impact.time_of_impact < x.time_of_impact => impact,
                 Some(x) => x,
             });
         }
@@ -709,6 +703,8 @@ where
         _pos12: &Isometry<Real>,
         _g1: &dyn Shape,
         _g2: &dyn Shape,
+        _normal_constraints1: Option<&dyn NormalConstraints>,
+        _normal_constraints2: Option<&dyn NormalConstraints>,
         _prediction: Real,
         _manifold: &mut ContactManifold<ManifoldData, ContactData>,
     ) -> Result<(), Unsupported> {
@@ -780,12 +776,15 @@ fn compute_manifolds<ManifoldData, ContactData>(
                 &pos12.inverse(),
                 other,
                 triangle,
+                None,
+                None,
                 prediction,
                 manifold,
             );
         } else {
-            let _ = dispatcher
-                .contact_manifold_convex_convex(pos12, triangle, other, prediction, manifold);
+            let _ = dispatcher.contact_manifold_convex_convex(
+                pos12, triangle, other, None, None, prediction, manifold,
+            );
         }
         true
     });
@@ -802,7 +801,7 @@ pub struct Workspace {
 
 impl WorkspaceData for Workspace {
     fn as_typed_workspace_data(&self) -> TypedWorkspaceData {
-        TypedWorkspaceData::Custom(0)
+        TypedWorkspaceData::Custom
     }
 
     fn clone_dyn(&self) -> Box<dyn WorkspaceData> {
@@ -855,7 +854,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
         let mut visit = |&composite_subshape: &u32| {
             other.map_part_at(
                 composite_subshape,
-                &mut |composite_part_pos, composite_part_shape| {
+                &mut |composite_part_pos, composite_part_shape, normal_constraints| {
                     let key = CompositeKey {
                         chunk_coords: coords,
                         triangle: index,
@@ -902,6 +901,8 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
                             &composite_part_pos.inv_mul(pos21),
                             composite_part_shape,
                             triangle,
+                            normal_constraints,
+                            None,
                             prediction,
                             manifold,
                         );
@@ -910,6 +911,8 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
                             &composite_part_pos.prepend_to(pos12),
                             triangle,
                             composite_part_shape,
+                            None,
+                            normal_constraints,
                             prediction,
                             manifold,
                         );
@@ -943,7 +946,7 @@ struct CompositeKey {
 
 impl WorkspaceData for WorkspaceVsComposite {
     fn as_typed_workspace_data(&self) -> TypedWorkspaceData {
-        TypedWorkspaceData::Custom(0)
+        TypedWorkspaceData::Custom
     }
 
     fn clone_dyn(&self) -> Box<dyn WorkspaceData> {
@@ -1197,7 +1200,7 @@ fn walk_patch(
 #[cfg(test)]
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
-    use parry3d_f64::{query::TOIStatus, shape::Ball};
+    use parry3d_f64::{query::ShapeCastStatus, shape::Ball};
 
     use crate::cubemap::Face;
 
@@ -1302,7 +1305,7 @@ mod tests {
     }
 
     #[test]
-    fn toi_smoke() {
+    fn cast_shape_smoke() {
         const PLANET_RADIUS: f64 = 6371e3;
         const DISTANCE: f64 = 10.0;
         let ball = Ball { radius: 1.0 };
@@ -1313,18 +1316,21 @@ mod tests {
         );
 
         let impact = PlanetDispatcher
-            .time_of_impact(
+            .cast_shapes(
                 &Isometry::translation(PLANET_RADIUS + DISTANCE, 0.0, 0.0),
                 &Vector::new(-1.0, 0.0, 0.0),
                 &planet,
                 &ball,
-                100.0,
-                false,
+                ShapeCastOptions {
+                    max_time_of_impact: 100.0,
+                    stop_at_penetration: false,
+                    ..Default::default()
+                },
             )
             .unwrap()
             .expect("toi not found");
-        assert_eq!(impact.status, TOIStatus::Converged);
-        assert_relative_eq!(impact.toi, DISTANCE - ball.radius);
+        assert_eq!(impact.status, ShapeCastStatus::Converged);
+        assert_relative_eq!(impact.time_of_impact, DISTANCE - ball.radius);
         assert_relative_eq!(impact.witness1, Point::new(PLANET_RADIUS, 0.0, 0.0));
         assert_relative_eq!(impact.witness2, Point::new(-ball.radius, 0.0, 0.0));
         assert_relative_eq!(impact.normal1, Vector::x_axis());
@@ -1350,7 +1356,7 @@ mod tests {
                 true,
             )
             .expect("hit not found");
-        assert_relative_eq!(hit.toi, DISTANCE, epsilon = 1e-3);
+        assert_relative_eq!(hit.time_of_impact, DISTANCE, epsilon = 1e-3);
         assert_relative_eq!(hit.normal, Vector::x_axis(), epsilon = 1e-3);
 
         let hit = planet.cast_local_ray_and_get_normal(
@@ -1435,7 +1441,7 @@ mod tests {
     }
 
     #[test]
-    fn nonlinear_toi_smoke() {
+    fn cast_shape_nonlinear_smoke() {
         const PLANET_RADIUS: f64 = 6371e3;
         let ball = Ball { radius: 1.0 };
         let planet = Planet::new(
@@ -1445,7 +1451,7 @@ mod tests {
         );
 
         let toi = PlanetDispatcher
-            .nonlinear_time_of_impact(
+            .cast_shapes_nonlinear(
                 &NonlinearRigidMotion::constant_position(na::one()),
                 &planet,
                 &NonlinearRigidMotion {
@@ -1461,8 +1467,8 @@ mod tests {
             )
             .unwrap()
             .expect("no hit");
-        assert_eq!(toi.status, TOIStatus::Converged);
-        assert_relative_eq!(toi.toi, 0.5);
+        assert_eq!(toi.status, ShapeCastStatus::Converged);
+        assert_relative_eq!(toi.time_of_impact, 0.5);
         assert_relative_eq!(toi.witness1, na::Point3::new(PLANET_RADIUS, 0.0, 0.0));
         assert_relative_eq!(toi.witness2, na::Point3::new(-ball.radius, 0.0, 0.0));
         assert_relative_eq!(toi.normal1, na::Vector3::x_axis());
@@ -1470,7 +1476,7 @@ mod tests {
 
         // Same configuration as above, but too far to hit within the allotted time
         let toi = PlanetDispatcher
-            .nonlinear_time_of_impact(
+            .cast_shapes_nonlinear(
                 &NonlinearRigidMotion::constant_position(na::one()),
                 &planet,
                 &NonlinearRigidMotion {
