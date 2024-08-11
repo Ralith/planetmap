@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Neg};
 use std::{alloc, fmt, mem, ptr};
 
-use na::{RealField, SimdRealField};
+use na::{ComplexField, RealField, SimdRealField};
+use num_traits::identities::One;
 
 /// A dense, fixed-resolution, warped cube map
 ///
@@ -822,17 +823,17 @@ where
             return None;
         }
         {
-            let edge_length = S::splat(Coords::edge_length::<S::Element>(self.face_resolution));
-            let origin_on_face_x =
-                S::splat(na::convert(self.coords.x as f32)).simd_mul_add(edge_length, -S::one());
-            let origin_on_face_y =
-                S::splat(na::convert(self.coords.y as f32)).simd_mul_add(edge_length, -S::one());
+            let edge_length = Coords::edge_length::<S::Element>(self.face_resolution);
+            let origin_on_face_x = na::convert::<_, S::Element>(self.coords.x as f32)
+                .mul_add(edge_length, -S::Element::one());
+            let origin_on_face_y = na::convert::<_, S::Element>(self.coords.y as f32)
+                .mul_add(edge_length, -S::Element::one());
             let max = self.chunk_resolution - 1;
             let (offset_x, offset_y) = if max == 0 {
-                let v = S::splat(na::convert(0.5)) * edge_length;
+                let v = S::splat(na::convert::<_, S::Element>(0.5) * edge_length);
                 (v, v)
             } else {
-                let step = edge_length / S::splat(na::convert(max as f32));
+                let step = edge_length / na::convert(max as f32);
                 let mut xs = S::zero();
                 for i in 0..S::LANES {
                     xs.replace(
@@ -847,10 +848,10 @@ where
                         na::convert(((self.index + i as u32) / self.chunk_resolution) as f32),
                     );
                 }
-                (xs * step, ys * step)
+                (xs * S::splat(step), ys * S::splat(step))
             };
-            let pos_on_face_x = origin_on_face_x + offset_x;
-            let pos_on_face_y = origin_on_face_y + offset_y;
+            let pos_on_face_x = S::splat(origin_on_face_x) + offset_x;
+            let pos_on_face_y = S::splat(origin_on_face_y) + offset_y;
 
             let warped_x = warp(pos_on_face_x);
             let warped_y = warp(pos_on_face_y);
