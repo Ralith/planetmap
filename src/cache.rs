@@ -29,7 +29,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             max_depth: 12,
-            max_neighbor_delta: u8::max_value(),
+            max_neighbor_delta: u8::MAX,
         }
     }
 }
