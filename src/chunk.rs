@@ -1,9 +1,5 @@
-#[cfg(feature = "simd")]
-use simdeez::Simd;
+use na::{RealField, SimdRealField};
 
-use na::RealField;
-
-#[cfg(feature = "simd")]
 use crate::cubemap::SampleIterSimd;
 use crate::cubemap::{Coords, Edge, Face, SampleIter};
 
@@ -142,8 +138,11 @@ impl Chunk {
     ///
     /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
     /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
-    #[cfg(feature = "simd")]
-    pub fn samples_ps<S: Simd>(&self, resolution: u32) -> SampleIterSimd<S> {
+    pub fn samples_ps<S>(&self, resolution: u32) -> SampleIterSimd<S>
+    where
+        S: SimdRealField + Copy,
+        S::Element: RealField + Copy,
+    {
         self.coords.samples_ps(self.resolution(), resolution)
     }
 
@@ -188,6 +187,7 @@ impl ExactSizeIterator for Path {
 mod test {
     use super::*;
     use approx::*;
+    use na::SimdValue;
 
     #[test]
     fn neighbors() {
@@ -372,15 +372,15 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn simd_samples() {
-        type S = simdeez::sse2::Sse2;
+        type S = simba::simd::WideF32x4;
 
         let chunk = Chunk::root(Face::Pz);
 
         let mut samples = chunk.samples(5);
-        for [x, y, z] in chunk.samples_ps::<S>(5) {
-            for i in 0..S::VF32_WIDTH {
+        for coords in chunk.samples_ps::<S>(5) {
+            let [x, y, z] = coords.map(<[f32; S::LANES]>::from);
+            for i in 0..S::LANES {
                 let reference = if let Some(v) = samples.next() {
                     v
                 } else {

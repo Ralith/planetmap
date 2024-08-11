@@ -1,12 +1,9 @@
 use std::cmp::Ordering;
-#[cfg(feature = "simd")]
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Neg};
 use std::{alloc, fmt, mem, ptr};
 
-use na::RealField;
-#[cfg(feature = "simd")]
-use simdeez::Simd;
+use na::{RealField, SimdRealField};
 
 /// A dense, fixed-resolution, warped cube map
 ///
@@ -653,12 +650,11 @@ impl Coords {
     ///
     /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
     /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
-    #[cfg(feature = "simd")]
-    pub fn samples_ps<S: Simd>(
-        &self,
-        face_resolution: u32,
-        chunk_resolution: u32,
-    ) -> SampleIterSimd<S> {
+    pub fn samples_ps<S>(&self, face_resolution: u32, chunk_resolution: u32) -> SampleIterSimd<S>
+    where
+        S: SimdRealField + Copy,
+        S::Element: RealField + Copy,
+    {
         SampleIterSimd {
             coords: *self,
             face_resolution,
@@ -671,23 +667,13 @@ impl Coords {
 
 /// Distort a [-1..1] cube face coordinate such that, when projected onto a sphere, area is close
 /// to equal
-pub(crate) fn warp<N: RealField + Copy>(x: N) -> N {
+pub(crate) fn warp<N: SimdRealField + Copy>(x: N) -> N {
     // 5th-order polynomial from "Cube-to-sphere Projections for Procedural Texturing and Beyond"
     // (Zucker, Higashi).
     let x2 = x * x;
     (na::convert::<_, N>(0.745558715593)
         + (na::convert::<_, N>(0.130546850193) + na::convert::<_, N>(0.123894434214) * x2) * x2)
         * x
-}
-
-#[cfg(feature = "simd")]
-fn warp_ps<S: Simd>(x: S::Vf32) -> S::Vf32 {
-    let x2 = x * x;
-    unsafe {
-        (S::set1_ps(0.745558715593)
-            + (S::set1_ps(0.130546850193) + S::set1_ps(0.123894434214) * x2) * x2)
-            * x
-    }
 }
 
 /// Derivative of `warp`
@@ -816,85 +802,82 @@ impl ExactSizeIterator for SampleIter {
 /// Iterator over sample points distributed in a regular grid across a chunk, including its edges
 ///
 /// Hand-vectorized, returning batches of each dimension in a separate register.
-#[cfg(feature = "simd")]
 #[derive(Debug)]
 pub struct SampleIterSimd<S> {
     coords: Coords,
     face_resolution: u32,
     chunk_resolution: u32,
     index: u32,
-    _simd: PhantomData<S>,
+    _simd: PhantomData<fn() -> S>,
 }
 
-#[cfg(feature = "simd")]
-impl<S: Simd> Iterator for SampleIterSimd<S> {
-    type Item = [S::Vf32; 3];
+impl<S> Iterator for SampleIterSimd<S>
+where
+    S: SimdRealField + Copy,
+    S::Element: RealField + Copy,
+{
+    type Item = [S; 3];
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.chunk_resolution * self.chunk_resolution {
             return None;
         }
-        unsafe {
-            let edge_length = S::set1_ps(Coords::edge_length::<f32>(self.face_resolution));
-            let origin_on_face_x = S::fmsub_ps(
-                S::set1_ps(self.coords.x as f32),
-                edge_length,
-                S::set1_ps(1.0),
-            );
-            let origin_on_face_y = S::fmsub_ps(
-                S::set1_ps(self.coords.y as f32),
-                edge_length,
-                S::set1_ps(1.0),
-            );
+        {
+            let edge_length = S::splat(Coords::edge_length::<S::Element>(self.face_resolution));
+            let origin_on_face_x =
+                S::splat(na::convert(self.coords.x as f32)).simd_mul_add(edge_length, -S::one());
+            let origin_on_face_y =
+                S::splat(na::convert(self.coords.y as f32)).simd_mul_add(edge_length, -S::one());
             let max = self.chunk_resolution - 1;
             let (offset_x, offset_y) = if max == 0 {
-                let v = S::set1_ps(0.5) * edge_length;
+                let v = S::splat(na::convert(0.5)) * edge_length;
                 (v, v)
             } else {
-                let step = edge_length / S::set1_ps(max as f32);
-                let mut xs = S::setzero_ps();
-                for i in 0..S::VF32_WIDTH {
-                    xs[i] = ((self.index + i as u32) % self.chunk_resolution) as f32;
+                let step = edge_length / S::splat(na::convert(max as f32));
+                let mut xs = S::zero();
+                for i in 0..S::LANES {
+                    xs.replace(
+                        i,
+                        na::convert(((self.index + i as u32) % self.chunk_resolution) as f32),
+                    );
                 }
-                let mut ys = S::setzero_ps();
-                for i in 0..S::VF32_WIDTH {
-                    ys[i] = ((self.index + i as u32) / self.chunk_resolution) as f32;
+                let mut ys = S::zero();
+                for i in 0..S::LANES {
+                    ys.replace(
+                        i,
+                        na::convert(((self.index + i as u32) / self.chunk_resolution) as f32),
+                    );
                 }
                 (xs * step, ys * step)
             };
             let pos_on_face_x = origin_on_face_x + offset_x;
             let pos_on_face_y = origin_on_face_y + offset_y;
 
-            let warped_x = warp_ps::<S>(pos_on_face_x);
-            let warped_y = warp_ps::<S>(pos_on_face_y);
+            let warped_x = warp(pos_on_face_x);
+            let warped_y = warp(pos_on_face_y);
 
-            let len = S::sqrt_ps(S::fmadd_ps(
-                warped_y,
-                warped_y,
-                S::fmadd_ps(warped_x, warped_x, S::set1_ps(1.0)),
-            ));
+            let len = warped_y
+                .simd_mul_add(warped_y, warped_x.simd_mul_add(warped_x, S::one()))
+                .simd_sqrt();
             let dir_x = warped_x / len;
             let dir_y = warped_y / len;
-            let dir_z = S::set1_ps(1.0) / len;
+            let dir_z = len.simd_recip();
 
-            let basis = self.coords.face.basis::<f32>();
+            let basis = self.coords.face.basis::<S::Element>();
             let basis = basis.matrix();
-            let x = S::fmadd_ps(
-                S::set1_ps(basis.m11),
+            let x = S::splat(basis.m11).simd_mul_add(
                 dir_x,
-                S::fmadd_ps(S::set1_ps(basis.m12), dir_y, S::set1_ps(basis.m13) * dir_z),
+                S::splat(basis.m12).simd_mul_add(dir_y, S::splat(basis.m13) * dir_z),
             );
-            let y = S::fmadd_ps(
-                S::set1_ps(basis.m21),
+            let y = S::splat(basis.m21).simd_mul_add(
                 dir_x,
-                S::fmadd_ps(S::set1_ps(basis.m22), dir_y, S::set1_ps(basis.m23) * dir_z),
+                S::splat(basis.m22).simd_mul_add(dir_y, S::splat(basis.m23) * dir_z),
             );
-            let z = S::fmadd_ps(
-                S::set1_ps(basis.m31),
+            let z = S::splat(basis.m31).simd_mul_add(
                 dir_x,
-                S::fmadd_ps(S::set1_ps(basis.m32), dir_y, S::set1_ps(basis.m33) * dir_z),
+                S::splat(basis.m32).simd_mul_add(dir_y, S::splat(basis.m33) * dir_z),
             );
 
-            self.index += S::VF32_WIDTH as u32;
+            self.index += S::LANES as u32;
             Some([x, y, z])
         }
     }
@@ -902,13 +885,16 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let total = self.chunk_resolution * self.chunk_resolution;
         let remaining = (total - self.index) as usize;
-        let x = (remaining + S::VF32_WIDTH - 1) / S::VF32_WIDTH;
+        let x = (remaining + S::LANES - 1) / S::LANES;
         (x, Some(x))
     }
 }
 
-#[cfg(feature = "simd")]
-impl<S: Simd> ExactSizeIterator for SampleIterSimd<S> {
+impl<S> ExactSizeIterator for SampleIterSimd<S>
+where
+    S: SimdRealField + Copy,
+    S::Element: RealField + Copy,
+{
     fn len(&self) -> usize {
         self.size_hint().0
     }
@@ -1144,10 +1130,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "simd")]
     fn simd_samples_consistent() {
-        use simdeez::scalar::Scalar;
-
         const COORDS: Coords = Coords {
             x: 0,
             y: 0,
@@ -1156,14 +1139,11 @@ mod test {
         const FACE_RES: u32 = 1;
         const CHUNK_RES: u32 = 17;
         let scalar = COORDS.samples(FACE_RES, CHUNK_RES);
-        let simd = COORDS.samples_ps::<Scalar>(FACE_RES, CHUNK_RES);
+        let simd = COORDS.samples_ps::<f32>(FACE_RES, CHUNK_RES);
         assert_eq!(simd.len(), scalar.len());
         for (scalar, [x, y, z]) in scalar.zip(simd) {
-            dbg!(x.0, y.0, z.0);
-            assert_abs_diff_eq!(
-                scalar,
-                na::Unit::new_unchecked(na::Vector3::new(x.0, y.0, z.0))
-            );
+            dbg!(x, y, z);
+            assert_abs_diff_eq!(scalar, na::Unit::new_unchecked(na::Vector3::new(x, y, z)));
         }
     }
 
