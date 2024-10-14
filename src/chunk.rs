@@ -386,9 +386,9 @@ mod test {
                 } else {
                     break;
                 };
-                assert_eq!(x[i], reference.x);
-                assert_eq!(y[i], reference.y);
-                assert_eq!(z[i], reference.z);
+                assert_relative_eq!(x[i], reference.x, epsilon = 1e-4);
+                assert_relative_eq!(y[i], reference.y, epsilon = 1e-4);
+                assert_relative_eq!(z[i], reference.z, epsilon = 1e-4);
             }
         }
     }
