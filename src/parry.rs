@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use hashbrown::hash_map;
 use hashbrown::HashMap;
+use lru_slab::LruSlab;
 use parry3d_f64::{
     bounding_volume::{Aabb, BoundingSphere, BoundingVolume},
     mass_properties::MassProperties,
@@ -23,10 +24,7 @@ use parry3d_f64::{
     utils::IsometryOpt,
 };
 
-use crate::{
-    cubemap::{Coords, Edge},
-    lru_slab::{LruSlab, SlotId},
-};
+use crate::cubemap::{Coords, Edge};
 
 /// Height data source for `Planet`
 pub trait Terrain: Send + Sync + 'static {
@@ -123,8 +121,8 @@ impl Planet {
         samples
     }
 
-    fn feature_id(&self, slot: SlotId, triangle: u32) -> u32 {
-        slot.0 * self.chunk_resolution * self.chunk_resolution + triangle
+    fn feature_id(&self, slot: u32, triangle: u32) -> u32 {
+        slot * self.chunk_resolution * self.chunk_resolution + triangle
     }
 
     /// Applies the function `f` to all the triangles intersecting the given sphere. Exits early on
@@ -133,7 +131,7 @@ impl Planet {
         &self,
         bounds: &BoundingSphere,
         aabb: &Aabb,
-        mut f: impl FnMut(&Coords, SlotId, u32, &Triangle) -> bool,
+        mut f: impl FnMut(&Coords, u32, u32, &Triangle) -> bool,
     ) {
         let dir = bounds.center().coords;
         let distance = dir.norm();
@@ -351,7 +349,7 @@ impl Shape for Planet {
 #[derive(Clone)]
 struct Cache {
     slots: LruSlab<ChunkData>,
-    index: HashMap<Coords, SlotId>,
+    index: HashMap<Coords, u32>,
 }
 
 impl Cache {
@@ -362,7 +360,7 @@ impl Cache {
         }
     }
 
-    pub fn get(&mut self, planet: &Planet, coords: &Coords) -> (SlotId, &ChunkData) {
+    pub fn get(&mut self, planet: &Planet, coords: &Coords) -> (u32, &ChunkData) {
         let (slot, old) = match self.index.entry(*coords) {
             hash_map::Entry::Occupied(e) => (*e.get(), None),
             hash_map::Entry::Vacant(e) => {

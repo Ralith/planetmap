@@ -9,6 +9,3 @@ pub use cache::Manager as CacheManager;
 
 #[cfg(feature = "parry")]
 pub mod parry;
-
-#[cfg(feature = "parry")]
-mod lru_slab;

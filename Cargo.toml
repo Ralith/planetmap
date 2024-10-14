@@ -10,7 +10,7 @@ readme = "README.md"
 all-features = true
 
 [features]
-parry = ["parry3d-f64"]
+parry = ["parry3d-f64", "lru-slab"]
 
 [dependencies]
 na = { package = "nalgebra", version = "0.33" }
@@ -18,6 +18,7 @@ slab = "0.4.2"
 hashbrown = "0.15"
 parry3d-f64 = { version = "0.17.0", optional = true }
 num-traits = "0.2.19"
+lru-slab = { version = "0.1.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
