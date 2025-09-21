@@ -162,7 +162,7 @@ impl Manager {
                 ChunkState {
                     chunk,
                     slot,
-                    renderable: slot.map_or(false, |idx| self.chunks[idx as usize].ready),
+                    renderable: slot.is_some_and(|idx| self.chunks[idx as usize].ready),
                 },
             );
         }
@@ -224,7 +224,7 @@ impl Manager {
         let children_renderable = chunk.renderable // this subtree should be rendered at all, and
             && child_slots                         // every child is already resident in the cache
             .iter()
-            .all(|slot| slot.map_or(false, |x| self.chunks[x as usize].ready));
+            .all(|slot| slot.is_some_and(|x| self.chunks[x as usize].ready));
         // If this subtree should be rendered and the children can't be rendered, this chunk must be rendered.
         if chunk.renderable && !children_renderable {
             self.render

@@ -134,11 +134,11 @@ impl<T> CubeMap<T> {
         self.resolution
     }
 
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         self.into_iter()
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         self.into_iter()
     }
 }
@@ -886,7 +886,7 @@ where
     fn size_hint(&self) -> (usize, Option<usize>) {
         let total = self.chunk_resolution * self.chunk_resolution;
         let remaining = (total - self.index) as usize;
-        let x = (remaining + S::LANES - 1) / S::LANES;
+        let x = remaining.div_ceil(S::LANES);
         (x, Some(x))
     }
 }

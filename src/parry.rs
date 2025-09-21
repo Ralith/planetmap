@@ -1177,9 +1177,7 @@ fn walk_patch(
             return None;
         }
         // Find the next quad along the ray
-        let Some((edge, toi)) = raycast_quad_edges(ray, &candidate.corners, max_toi) else {
-            return None;
-        };
+        let (edge, toi) = raycast_quad_edges(ray, &candidate.corners, max_toi)?;
         quad += edge.direction().into_inner();
         if quad.x >= quad_resolution_f
             || quad.y >= quad_resolution_f
