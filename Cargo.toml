@@ -13,10 +13,10 @@ all-features = true
 parry = ["parry3d-f64", "lru-slab"]
 
 [dependencies]
-na = { package = "nalgebra", version = "0.33" }
+na = { package = "nalgebra", version = "0.34.1" }
 slab = "0.4.2"
 hashbrown = "0.15"
-parry3d-f64 = { version = "0.17.0", optional = true }
+parry3d-f64 = { version = "0.24.0", optional = true }
 num-traits = "0.2.19"
 lru-slab = { version = "0.1.1", optional = true }
 

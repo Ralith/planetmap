@@ -14,13 +14,13 @@ use parry3d_f64::{
     mass_properties::MassProperties,
     math::{Isometry, Point, Real, Vector},
     query::{
-        details::NormalConstraints, visitors::BoundingVolumeIntersectionsVisitor, ClosestPoints,
-        Contact, ContactManifold, ContactManifoldsWorkspace, DefaultQueryDispatcher,
-        NonlinearRigidMotion, PersistentQueryDispatcher, PointProjection, PointQuery,
-        QueryDispatcher, Ray, RayCast, RayIntersection, ShapeCastHit, ShapeCastOptions,
-        TypedWorkspaceData, Unsupported, WorkspaceData,
+        details::NormalConstraints, ClosestPoints, Contact, ContactManifold,
+        ContactManifoldsWorkspace, DefaultQueryDispatcher, NonlinearRigidMotion,
+        PersistentQueryDispatcher, PointProjection, PointQuery, QueryDispatcher, Ray, RayCast,
+        RayIntersection, ShapeCastHit, ShapeCastOptions, TypedWorkspaceData, Unsupported,
+        WorkspaceData,
     },
-    shape::{FeatureId, HalfSpace, Shape, ShapeType, SimdCompositeShape, Triangle, TypedShape},
+    shape::{CompositeShape, FeatureId, HalfSpace, Shape, ShapeType, Triangle, TypedShape},
     utils::IsometryOpt,
 };
 
@@ -818,7 +818,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     pos12: &Isometry<Real>,
     pos21: &Isometry<Real>,
     planet: &Planet,
-    other: &dyn SimdCompositeShape,
+    other: &dyn CompositeShape,
     prediction: Real,
     manifolds: &mut Vec<ContactManifold<ManifoldData, ContactData>>,
     workspace: &mut Option<ContactManifoldsWorkspace>,
@@ -837,7 +837,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     workspace.phase ^= true;
     let phase = workspace.phase;
 
-    let bvh = other.qbvh();
+    let bvh = other.bvh();
 
     let bounds = bvh
         .root_aabb()
@@ -849,7 +849,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     planet.map_elements_in_local_sphere(&bounds, &aabb, |&coords, slot, index, triangle| {
         let tri_aabb = triangle.compute_aabb(pos21).loosened(prediction);
 
-        let mut visit = |&composite_subshape: &u32| {
+        for composite_subshape in bvh.intersect_aabb(&tri_aabb) {
             other.map_part_at(
                 composite_subshape,
                 &mut |composite_part_pos, composite_part_shape, normal_constraints| {
@@ -917,10 +917,7 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
                     }
                 },
             );
-            true
-        };
-        let mut visitor = BoundingVolumeIntersectionsVisitor::new(&tri_aabb, &mut visit);
-        bvh.traverse_depth_first(&mut visitor);
+        }
 
         true
     });
