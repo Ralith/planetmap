@@ -21,7 +21,7 @@ num-traits = "0.2.19"
 lru-slab = { version = "0.1.1", optional = true }
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = "0.7.0"
 approx = "0.5"
 simba = { version = "0.9", features = ["wide"] }
 
