@@ -19,7 +19,7 @@ fn face_coords(c: &mut Criterion) {
     c.bench_function("get vector coordinates on face", |b| {
         b.iter(|| {
             let v = na::Vector3::new(0.42, 0.17, 0.12);
-            criterion::black_box(cubemap::Face::coords(&v));
+            std::hint::black_box(cubemap::Face::coords(&v));
         });
     });
 }
