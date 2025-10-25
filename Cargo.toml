@@ -11,14 +11,15 @@ all-features = true
 
 [features]
 parry = ["parry3d-f64", "lru-slab"]
+fearless_simd = ["dep:fearless_simd"]
 
 [dependencies]
 na = { package = "nalgebra", version = "0.34.1" }
 slab = "0.4.2"
 hashbrown = "0.16"
 parry3d-f64 = { version = "0.25.0", optional = true }
-num-traits = "0.2.19"
 lru-slab = { version = "0.1.1", optional = true }
+fearless_simd = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
 criterion = "0.7.0"

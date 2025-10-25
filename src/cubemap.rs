@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
-use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Neg};
 use std::{alloc, fmt, mem, ptr};
 
-use na::{ComplexField, RealField, SimdRealField};
-use num_traits::identities::One;
+#[cfg(feature = "fearless_simd")]
+use fearless_simd::{Simd, SimdBase, SimdElement, SimdFloat};
+use na::{RealField, SimdRealField};
 
 /// A dense, fixed-resolution, warped cube map
 ///
@@ -651,17 +651,19 @@ impl Coords {
     ///
     /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
     /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
-    pub fn samples_ps<S>(&self, face_resolution: u32, chunk_resolution: u32) -> SampleIterSimd<S>
-    where
-        S: SimdRealField + Copy,
-        S::Element: RealField + Copy,
-    {
+    #[cfg(feature = "fearless_simd")]
+    pub fn samples_ps<S: Simd>(
+        &self,
+        simd: S,
+        face_resolution: u32,
+        chunk_resolution: u32,
+    ) -> SampleIterSimd<S> {
         SampleIterSimd {
             coords: *self,
             face_resolution,
             chunk_resolution,
             index: 0,
-            _simd: PhantomData,
+            simd,
         }
     }
 }
@@ -675,6 +677,14 @@ pub(crate) fn warp<N: SimdRealField + Copy>(x: N) -> N {
     (na::convert::<_, N>(0.745558715593)
         + (na::convert::<_, N>(0.130546850193) + na::convert::<_, N>(0.123894434214) * x2) * x2)
         * x
+}
+
+/// See `warp`
+#[cfg(feature = "fearless_simd")]
+fn warp_ps<S: Simd, N: RealField + SimdElement, F: SimdFloat<N, S>>(x: F) -> F {
+    let x2 = x * x;
+    x * ((x2 * na::convert::<_, N>(0.123894434214) + na::convert::<_, N>(0.130546850193)) * x2
+        + na::convert::<_, N>(0.745558715593))
 }
 
 /// Derivative of `warp`
@@ -804,81 +814,69 @@ impl ExactSizeIterator for SampleIter {
 ///
 /// Hand-vectorized, returning batches of each dimension in a separate register.
 #[derive(Debug)]
+#[cfg(feature = "fearless_simd")]
 pub struct SampleIterSimd<S> {
     coords: Coords,
     face_resolution: u32,
     chunk_resolution: u32,
     index: u32,
-    _simd: PhantomData<fn() -> S>,
+    simd: S,
 }
 
-impl<S> Iterator for SampleIterSimd<S>
-where
-    S: SimdRealField + Copy,
-    S::Element: RealField + Copy,
-{
-    type Item = [S; 3];
+#[cfg(feature = "fearless_simd")]
+impl<S: Simd> Iterator for SampleIterSimd<S> {
+    type Item = [S::f32s; 3];
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.chunk_resolution * self.chunk_resolution {
             return None;
         }
         {
-            let edge_length = Coords::edge_length::<S::Element>(self.face_resolution);
-            let origin_on_face_x = na::convert::<_, S::Element>(self.coords.x as f32)
-                .mul_add(edge_length, -S::Element::one());
-            let origin_on_face_y = na::convert::<_, S::Element>(self.coords.y as f32)
-                .mul_add(edge_length, -S::Element::one());
+            let edge_length = Coords::edge_length::<f32>(self.face_resolution);
+            let origin_on_face_x = (self.coords.x as f32).mul_add(edge_length, -1.0);
+            let origin_on_face_y = (self.coords.y as f32).mul_add(edge_length, -1.0);
             let max = self.chunk_resolution - 1;
             let (offset_x, offset_y) = if max == 0 {
-                let v = S::splat(na::convert::<_, S::Element>(0.5) * edge_length);
+                let v = S::f32s::splat(self.simd, 0.5 * edge_length);
                 (v, v)
             } else {
-                let step = edge_length / na::convert(max as f32);
-                let mut xs = S::zero();
-                for i in 0..S::LANES {
-                    xs.replace(
-                        i,
-                        na::convert(((self.index + i as u32) % self.chunk_resolution) as f32),
-                    );
+                let step = edge_length / max as f32;
+                let mut xs = S::f32s::splat(self.simd, 0.0);
+                for (i, x) in xs.as_mut_slice().iter_mut().enumerate() {
+                    *x = ((self.index + i as u32) % self.chunk_resolution) as f32;
                 }
-                let mut ys = S::zero();
-                for i in 0..S::LANES {
-                    ys.replace(
-                        i,
-                        na::convert(((self.index + i as u32) / self.chunk_resolution) as f32),
-                    );
+                let mut ys = S::f32s::splat(self.simd, 0.0);
+                for (i, y) in ys.as_mut_slice().iter_mut().enumerate() {
+                    *y = ((self.index + i as u32) / self.chunk_resolution) as f32;
                 }
-                (xs * S::splat(step), ys * S::splat(step))
+                (xs * step, ys * step)
             };
-            let pos_on_face_x = S::splat(origin_on_face_x) + offset_x;
-            let pos_on_face_y = S::splat(origin_on_face_y) + offset_y;
+            let pos_on_face_x = offset_x + origin_on_face_x;
+            let pos_on_face_y = offset_y + origin_on_face_y;
 
-            let warped_x = warp(pos_on_face_x);
-            let warped_y = warp(pos_on_face_y);
+            let warped_x = warp_ps(pos_on_face_x);
+            let warped_y = warp_ps(pos_on_face_y);
 
-            let len = warped_y
-                .simd_mul_add(warped_y, warped_x.simd_mul_add(warped_x, S::one()))
-                .simd_sqrt();
+            let len = warped_y.madd(warped_y, warped_x.madd(warped_x, 1.0)).sqrt();
             let dir_x = warped_x / len;
             let dir_y = warped_y / len;
-            let dir_z = len.simd_recip();
+            let dir_z = S::f32s::splat(self.simd, 1.0) / len;
 
-            let basis = self.coords.face.basis::<S::Element>();
+            let basis = self.coords.face.basis::<f32>();
             let basis = basis.matrix();
-            let x = S::splat(basis.m11).simd_mul_add(
+            let x = S::f32s::splat(self.simd, basis.m11).madd(
                 dir_x,
-                S::splat(basis.m12).simd_mul_add(dir_y, S::splat(basis.m13) * dir_z),
+                S::f32s::splat(self.simd, basis.m12).madd(dir_y, dir_z * basis.m13),
             );
-            let y = S::splat(basis.m21).simd_mul_add(
+            let y = S::f32s::splat(self.simd, basis.m21).madd(
                 dir_x,
-                S::splat(basis.m22).simd_mul_add(dir_y, S::splat(basis.m23) * dir_z),
+                S::f32s::splat(self.simd, basis.m22).madd(dir_y, dir_z * basis.m23),
             );
-            let z = S::splat(basis.m31).simd_mul_add(
+            let z = S::f32s::splat(self.simd, basis.m31).madd(
                 dir_x,
-                S::splat(basis.m32).simd_mul_add(dir_y, S::splat(basis.m33) * dir_z),
+                S::f32s::splat(self.simd, basis.m32).madd(dir_y, dir_z * basis.m33),
             );
 
-            self.index += S::LANES as u32;
+            self.index += S::f32s::N as u32;
             Some([x, y, z])
         }
     }
@@ -886,16 +884,13 @@ where
     fn size_hint(&self) -> (usize, Option<usize>) {
         let total = self.chunk_resolution * self.chunk_resolution;
         let remaining = (total - self.index) as usize;
-        let x = remaining.div_ceil(S::LANES);
+        let x = remaining.div_ceil(S::f32s::N);
         (x, Some(x))
     }
 }
 
-impl<S> ExactSizeIterator for SampleIterSimd<S>
-where
-    S: SimdRealField + Copy,
-    S::Element: RealField + Copy,
-{
+#[cfg(feature = "fearless_simd")]
+impl<S: Simd> ExactSizeIterator for SampleIterSimd<S> {
     fn len(&self) -> usize {
         self.size_hint().0
     }
@@ -1131,7 +1126,10 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "fearless_simd")]
     fn simd_samples_consistent() {
+        use fearless_simd::Fallback;
+
         const COORDS: Coords = Coords {
             x: 0,
             y: 0,
@@ -1139,12 +1137,21 @@ mod test {
         };
         const FACE_RES: u32 = 1;
         const CHUNK_RES: u32 = 17;
-        let scalar = COORDS.samples(FACE_RES, CHUNK_RES);
-        let simd = COORDS.samples_ps::<f32>(FACE_RES, CHUNK_RES);
-        assert_eq!(simd.len(), scalar.len());
-        for (scalar, [x, y, z]) in scalar.zip(simd) {
-            dbg!(x, y, z);
-            assert_abs_diff_eq!(scalar, na::Unit::new_unchecked(na::Vector3::new(x, y, z)));
+        let mut scalar = COORDS.samples(FACE_RES, CHUNK_RES);
+        let simd = COORDS.samples_ps(Fallback::new(), FACE_RES, CHUNK_RES);
+        assert_eq!(
+            simd.len(),
+            scalar.len().div_ceil(<Fallback as Simd>::f32s::N)
+        );
+        for vs in simd {
+            for i in 0..<Fallback as Simd>::f32s::N {
+                let [x, y, z] = vs.map(|c| c.as_slice()[i]);
+                let Some(scalar) = scalar.next() else {
+                    break;
+                };
+                let simd = na::Unit::new_unchecked(na::Vector3::new(x, y, z));
+                assert_abs_diff_eq!(scalar, simd);
+            }
         }
     }
 

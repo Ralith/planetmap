@@ -1,5 +1,8 @@
-use na::{RealField, SimdRealField};
+#[cfg(feature = "fearless_simd")]
+use fearless_simd::Simd;
+use na::RealField;
 
+#[cfg(feature = "fearless_simd")]
 use crate::cubemap::SampleIterSimd;
 use crate::cubemap::{Coords, Edge, Face, SampleIter};
 
@@ -138,12 +141,9 @@ impl Chunk {
     ///
     /// Because this returns data in batches of `S::VF32_WIDTH`, a few excess values will be
     /// computed at the end for any `resolution` whose square is not a multiple of the batch size.
-    pub fn samples_ps<S>(&self, resolution: u32) -> SampleIterSimd<S>
-    where
-        S: SimdRealField + Copy,
-        S::Element: RealField + Copy,
-    {
-        self.coords.samples_ps(self.resolution(), resolution)
+    #[cfg(feature = "fearless_simd")]
+    pub fn samples_ps<S: Simd>(&self, simd: S, resolution: u32) -> SampleIterSimd<S> {
+        self.coords.samples_ps(simd, self.resolution(), resolution)
     }
 
     /// Compute the direction identified by a [0..1]^2 vector on this chunk
@@ -187,7 +187,6 @@ impl ExactSizeIterator for Path {
 mod test {
     use super::*;
     use approx::*;
-    use na::SimdValue;
 
     #[test]
     fn neighbors() {
@@ -372,15 +371,16 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "fearless_simd")]
     fn simd_samples() {
-        type S = simba::simd::WideF32x4;
+        use fearless_simd::{Fallback, SimdBase};
 
         let chunk = Chunk::root(Face::Pz);
 
         let mut samples = chunk.samples(5);
-        for coords in chunk.samples_ps::<S>(5) {
-            let [x, y, z] = coords.map(<[f32; S::LANES]>::from);
-            for i in 0..S::LANES {
+        for coords in chunk.samples_ps(Fallback::new(), 5) {
+            let [x, y, z] = coords.map(<[f32; <Fallback as Simd>::f32s::N]>::from);
+            for i in 0..<Fallback as Simd>::f32s::N {
                 let reference = if let Some(v) = samples.next() {
                     v
                 } else {
