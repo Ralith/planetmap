@@ -133,7 +133,7 @@ impl Chunk {
     }
 
     /// Returns a grid of resolution^2 directions contained by the chunk, in scan-line order
-    pub fn samples(&self, resolution: u32) -> SampleIter {
+    pub fn samples<N: RealField + Copy>(&self, resolution: u32) -> SampleIter<N> {
         self.coords.samples(self.resolution(), resolution)
     }
 
@@ -285,19 +285,19 @@ mod test {
     fn sample_count() {
         let chunk = Chunk::root(Face::Pz);
         for i in 0..4 {
-            assert_eq!(chunk.samples(i).count(), (i * i) as usize);
+            assert_eq!(chunk.samples::<f32>(i).count(), (i * i) as usize);
         }
     }
 
     #[test]
     fn sample_sanity() {
         assert_eq!(
-            Chunk::root(Face::Pz).samples(1).next().unwrap(),
+            Chunk::root(Face::Pz).samples::<f32>(1).next().unwrap(),
             na::Vector3::z_axis()
         );
 
         let chunk = Chunk::root(Face::Pz).children()[1];
-        assert!(chunk.samples(2).any(|x| x == na::Vector3::z_axis()));
+        assert!(chunk.samples::<f32>(2).any(|x| x == na::Vector3::z_axis()));
 
         // Every face's
         for face in Face::iter() {
@@ -306,7 +306,7 @@ mod test {
                 // each have one sample at exactly the center of the face
                 assert_eq!(
                     chunk
-                        .samples(2)
+                        .samples::<f32>(2)
                         .filter(|&x| x == face.basis() * na::Vector3::z_axis())
                         .count(),
                     1
@@ -315,7 +315,7 @@ mod test {
                 let corner = 1.0 / 3.0f32.sqrt();
                 assert_eq!(
                     chunk
-                        .samples(2)
+                        .samples::<f32>(2)
                         .filter(|&x| abs_diff_eq!(x.x.abs(), corner)
                             && abs_diff_eq!(x.y.abs(), corner)
                             && abs_diff_eq!(x.z.abs(), corner))
@@ -340,7 +340,7 @@ mod test {
         let neighbor = chunk.neighbors()[0];
         assert_eq!(
             children[0]
-                .samples(5)
+                .samples::<f32>(5)
                 .map(|child_vert| neighbor
                     .samples(5)
                     .filter(|&neighbor_vert| neighbor_vert == child_vert)

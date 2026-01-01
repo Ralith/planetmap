@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Neg};
 use std::{alloc, fmt, mem, ptr};
 
@@ -638,12 +639,17 @@ impl Coords {
     /// (0.5/w, 0.5/h), and the last has position (1, 1), not (1 - 0.5/w, 1 - 0.5/h). This allows
     /// for seamless interpolation in the neighborhood of chunk edges/corners without needing access
     /// to data for neighboring chunks.
-    pub fn samples(&self, face_resolution: u32, chunk_resolution: u32) -> SampleIter {
+    pub fn samples<N: RealField + Copy>(
+        &self,
+        face_resolution: u32,
+        chunk_resolution: u32,
+    ) -> SampleIter<N> {
         SampleIter {
             coords: *self,
             face_resolution,
             chunk_resolution,
             index: 0,
+            _marker: PhantomData,
         }
     }
 
@@ -767,29 +773,30 @@ impl<T> IndexMut<Edge> for [T] {
 
 /// Iterator over sample points distributed in a regular grid across a chunk, including its edges
 #[derive(Debug)]
-pub struct SampleIter {
+pub struct SampleIter<N> {
     coords: Coords,
     face_resolution: u32,
     chunk_resolution: u32,
     index: u32,
+    _marker: PhantomData<fn() -> N>,
 }
 
-impl Iterator for SampleIter {
-    type Item = na::Unit<na::Vector3<f32>>;
-    fn next(&mut self) -> Option<na::Unit<na::Vector3<f32>>> {
+impl<N: RealField + Copy> Iterator for SampleIter<N> {
+    type Item = na::Unit<na::Vector3<N>>;
+    fn next(&mut self) -> Option<na::Unit<na::Vector3<N>>> {
         if self.index >= self.chunk_resolution * self.chunk_resolution {
             return None;
         }
         let max = self.chunk_resolution - 1;
         let coords = if max == 0 {
-            na::Point2::new(0.5, 0.5)
+            na::Point2::new(0.5, 0.5).cast::<N>()
         } else {
-            let step = 1.0 / max as f32;
+            let step = 1.0 / max as f64;
             let (x, y) = (
                 self.index % self.chunk_resolution,
                 self.index / self.chunk_resolution,
             );
-            na::Point2::new(x as f32, y as f32) * step
+            na::Point2::new(x as f64, y as f64).cast::<N>() * na::convert::<f64, N>(step)
         };
         let dir = self.coords.direction(self.face_resolution, &coords);
         self.index += 1;
@@ -803,7 +810,7 @@ impl Iterator for SampleIter {
     }
 }
 
-impl ExactSizeIterator for SampleIter {
+impl<N: RealField + Copy> ExactSizeIterator for SampleIter<N> {
     fn len(&self) -> usize {
         let total = self.chunk_resolution * self.chunk_resolution;
         (total - self.index) as usize
@@ -1090,7 +1097,10 @@ mod test {
             y: 0,
             face: Face::Py,
         };
-        assert_abs_diff_eq!(COORDS.samples(1, 1).next().unwrap(), na::Vector3::y_axis());
+        assert_abs_diff_eq!(
+            COORDS.samples::<f32>(1, 1).next().unwrap(),
+            na::Vector3::y_axis()
+        );
         let corners = COORDS
             .samples(1, 2)
             .map(|x| x.into_inner())
@@ -1119,8 +1129,8 @@ mod test {
             y: 0,
             face: Face::Pz,
         };
-        let left = LEFT.samples(2, 2).collect::<Vec<_>>();
-        let right = RIGHT.samples(2, 2).collect::<Vec<_>>();
+        let left = LEFT.samples::<f32>(2, 2).collect::<Vec<_>>();
+        let right = RIGHT.samples::<f32>(2, 2).collect::<Vec<_>>();
         assert_abs_diff_eq!(left[1], right[0]);
         assert_abs_diff_eq!(left[3], right[2]);
     }
