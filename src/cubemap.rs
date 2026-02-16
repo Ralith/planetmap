@@ -687,7 +687,7 @@ pub(crate) fn warp<N: SimdRealField + Copy>(x: N) -> N {
 
 /// See `warp`
 #[cfg(feature = "fearless_simd")]
-fn warp_ps<S: Simd, N: RealField + SimdElement, F: SimdFloat<N, S>>(x: F) -> F {
+fn warp_ps<S: Simd, N: RealField + SimdElement, F: SimdFloat<S, Element = N>>(x: F) -> F {
     let x2 = x * x;
     x * ((x2 * na::convert::<_, N>(0.123894434214) + na::convert::<_, N>(0.130546850193)) * x2
         + na::convert::<_, N>(0.745558715593))
@@ -863,24 +863,26 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
             let warped_x = warp_ps(pos_on_face_x);
             let warped_y = warp_ps(pos_on_face_y);
 
-            let len = warped_y.madd(warped_y, warped_x.madd(warped_x, 1.0)).sqrt();
+            let len = warped_y
+                .mul_add(warped_y, warped_x.mul_add(warped_x, 1.0))
+                .sqrt();
             let dir_x = warped_x / len;
             let dir_y = warped_y / len;
             let dir_z = S::f32s::splat(self.simd, 1.0) / len;
 
             let basis = self.coords.face.basis::<f32>();
             let basis = basis.matrix();
-            let x = S::f32s::splat(self.simd, basis.m11).madd(
+            let x = S::f32s::splat(self.simd, basis.m11).mul_add(
                 dir_x,
-                S::f32s::splat(self.simd, basis.m12).madd(dir_y, dir_z * basis.m13),
+                S::f32s::splat(self.simd, basis.m12).mul_add(dir_y, dir_z * basis.m13),
             );
-            let y = S::f32s::splat(self.simd, basis.m21).madd(
+            let y = S::f32s::splat(self.simd, basis.m21).mul_add(
                 dir_x,
-                S::f32s::splat(self.simd, basis.m22).madd(dir_y, dir_z * basis.m23),
+                S::f32s::splat(self.simd, basis.m22).mul_add(dir_y, dir_z * basis.m23),
             );
-            let z = S::f32s::splat(self.simd, basis.m31).madd(
+            let z = S::f32s::splat(self.simd, basis.m31).mul_add(
                 dir_x,
-                S::f32s::splat(self.simd, basis.m32).madd(dir_y, dir_z * basis.m33),
+                S::f32s::splat(self.simd, basis.m32).mul_add(dir_y, dir_z * basis.m33),
             );
 
             self.index += S::f32s::N as u32;
