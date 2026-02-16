@@ -798,7 +798,7 @@ pub struct Workspace {
 }
 
 impl WorkspaceData for Workspace {
-    fn as_typed_workspace_data(&self) -> TypedWorkspaceData {
+    fn as_typed_workspace_data(&self) -> TypedWorkspaceData<'_> {
         TypedWorkspaceData::Custom
     }
 
@@ -940,7 +940,7 @@ struct CompositeKey {
 }
 
 impl WorkspaceData for WorkspaceVsComposite {
-    fn as_typed_workspace_data(&self) -> TypedWorkspaceData {
+    fn as_typed_workspace_data(&self) -> TypedWorkspaceData<'_> {
         TypedWorkspaceData::Custom
     }
 
