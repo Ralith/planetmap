@@ -24,7 +24,7 @@ fearless_simd = { version = "0.4.0", optional = true }
 [dev-dependencies]
 criterion = "0.8.0"
 approx = "0.5"
-simba = { version = "0.9", features = ["wide"] }
+simba = { version = "0.10", features = ["wide"] }
 
 [[bench]]
 name = "bench"
