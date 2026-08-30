@@ -1,6 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 #[cfg(feature = "parry")]
 use parry3d_f64::{
+    math::{Pose, Vector},
     query::{PointQuery, QueryDispatcher, Ray, RayCast},
     shape::Ball,
 };
@@ -75,11 +76,7 @@ fn collision(c: &mut Criterion) {
     c.bench_function("intersect", |b| {
         b.iter(|| {
             assert!(PlanetDispatcher
-                .intersection_test(
-                    &na::Isometry3::translation(PLANET_RADIUS, 0.0, 0.0),
-                    &planet,
-                    &ball,
-                )
+                .intersection_test(&Pose::translation(PLANET_RADIUS, 0.0, 0.0), &planet, &ball,)
                 .unwrap());
         });
     });
@@ -88,8 +85,8 @@ fn collision(c: &mut Criterion) {
         b.iter(|| {
             planet.cast_local_ray(
                 &Ray {
-                    origin: na::Point3::new(PLANET_RADIUS + 1.0, 0.0, 0.0),
-                    dir: na::Vector3::y(),
+                    origin: Vector::new(PLANET_RADIUS + 1.0, 0.0, 0.0),
+                    dir: Vector::Y,
                 },
                 1e1,
                 true,
@@ -101,8 +98,8 @@ fn collision(c: &mut Criterion) {
         b.iter(|| {
             planet.cast_local_ray(
                 &Ray {
-                    origin: na::Point3::new(PLANET_RADIUS + 1.0, 0.0, 0.0),
-                    dir: na::Vector3::y(),
+                    origin: Vector::new(PLANET_RADIUS + 1.0, 0.0, 0.0),
+                    dir: Vector::Y,
                 },
                 1e3,
                 true,
@@ -113,8 +110,8 @@ fn collision(c: &mut Criterion) {
     c.bench_function("project point", |b| {
         b.iter(|| {
             planet.project_point(
-                &na::Isometry3::identity(),
-                &na::Point3::new(PLANET_RADIUS + 1.0, 0.0, 0.0),
+                &Pose::identity(),
+                Vector::new(PLANET_RADIUS + 1.0, 0.0, 0.0),
                 true,
             )
         });
