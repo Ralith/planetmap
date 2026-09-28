@@ -27,7 +27,6 @@ criterion = "0.8.0"
 approx = "0.5"
 # Enable glam's approx impls for use with the `approx` crate in tests
 glam = { version = "0.33", features = ["approx"] }
-simba = { version = "0.9", features = ["wide"] }
 fearless_simd = { version = "0.7", features = ["force_support_fallback"] }
 
 [[bench]]
