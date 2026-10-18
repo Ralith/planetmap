@@ -885,7 +885,7 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
                 S::f32s::splat(self.simd, basis.m32).mul_add(dir_y, dir_z * basis.m33),
             );
 
-            self.index += S::f32s::N as u32;
+            self.index += S::f32s::LEN as u32;
             Some([x, y, z])
         }
     }
@@ -893,7 +893,7 @@ impl<S: Simd> Iterator for SampleIterSimd<S> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let total = self.chunk_resolution * self.chunk_resolution;
         let remaining = (total - self.index) as usize;
-        let x = remaining.div_ceil(S::f32s::N);
+        let x = remaining.div_ceil(S::f32s::LEN);
         (x, Some(x))
     }
 }
@@ -1153,10 +1153,10 @@ mod test {
         let simd = COORDS.samples_ps(Fallback::new(), FACE_RES, CHUNK_RES);
         assert_eq!(
             simd.len(),
-            scalar.len().div_ceil(<Fallback as Simd>::f32s::N)
+            scalar.len().div_ceil(<Fallback as Simd>::f32s::LEN)
         );
         for vs in simd {
-            for i in 0..<Fallback as Simd>::f32s::N {
+            for i in 0..<Fallback as Simd>::f32s::LEN {
                 let [x, y, z] = vs.map(|c| c.as_slice()[i]);
                 let Some(scalar) = scalar.next() else {
                     break;

@@ -379,8 +379,8 @@ mod test {
 
         let mut samples = chunk.samples(5);
         for coords in chunk.samples_ps(Fallback::new(), 5) {
-            let [x, y, z] = coords.map(<[f32; <Fallback as Simd>::f32s::N]>::from);
-            for i in 0..<Fallback as Simd>::f32s::N {
+            let [x, y, z] = coords.map(<[f32; <Fallback as Simd>::f32s::LEN]>::from);
+            for i in 0..<Fallback as Simd>::f32s::LEN {
                 let reference = if let Some(v) = samples.next() {
                     v
                 } else {
