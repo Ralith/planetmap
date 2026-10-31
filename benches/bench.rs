@@ -75,9 +75,12 @@ fn collision(c: &mut Criterion) {
 
     c.bench_function("intersect", |b| {
         b.iter(|| {
-            assert!(PlanetDispatcher
-                .intersection_test(&Pose::translation(PLANET_RADIUS, 0.0, 0.0), &planet, &ball,)
-                .unwrap());
+            assert!(
+                PlanetDispatcher
+                    .intersection_test(&Pose::translation(PLANET_RADIUS, 0.0, 0.0), &planet, &ball,)
+                    .unwrap()
+                    .intersecting
+            );
         });
     });
 

@@ -18,8 +18,8 @@ use parry3d_f64::{
         details::NormalConstraints, ClosestPoints, Contact, ContactManifold,
         ContactManifoldsWorkspace, DefaultQueryDispatcher, NonlinearRigidMotion,
         PersistentQueryDispatcher, PointProjection, PointQuery, QueryDispatcher, Ray, RayCast,
-        RayIntersection, ShapeCastHit, ShapeCastOptions, TypedWorkspaceData, Unsupported,
-        WorkspaceData,
+        RayIntersection, ShapeCastHit, ShapeCastOptions, ShapeDistance, ShapeIntersection,
+        TypedWorkspaceData, Unsupported, WorkspaceData,
     },
     shape::{CompositeShape, FeatureId, HalfSpace, Shape, ShapeType, Triangle, TypedShape},
     utils::PoseOpt,
@@ -270,10 +270,7 @@ fn raycast_quad_edges(ray: &Ray, [a, b, c, d]: &[Vector; 4], max_toi: f64) -> Op
 impl PointQuery for Planet {
     fn project_local_point(&self, pt: Vector, solid: bool) -> PointProjection {
         if solid && pt.length_squared() < self.min_radius() * self.min_radius() {
-            return PointProjection {
-                is_inside: true,
-                point: pt,
-            };
+            return PointProjection::new(true, pt);
         }
         // TODO: Handle `solid` near the surface
         self.project_local_point_and_get_feature(pt).0
@@ -418,12 +415,12 @@ impl QueryDispatcher for PlanetDispatcher {
         pos12: &Pose,
         g1: &dyn Shape,
         g2: &dyn Shape,
-    ) -> Result<bool, Unsupported> {
+    ) -> Result<ShapeIntersection, Unsupported> {
         if let Some(p1) = g1.as_shape::<Planet>() {
-            return Ok(intersects(pos12, p1, g2));
+            return Ok(intersects(pos12, p1, g2).into());
         }
         if let Some(p2) = g2.as_shape::<Planet>() {
-            return Ok(intersects(&pos12.inverse(), p2, g1));
+            return Ok(intersects(&pos12.inverse(), p2, g1).into());
         }
         Err(Unsupported)
     }
@@ -433,7 +430,7 @@ impl QueryDispatcher for PlanetDispatcher {
         _pos12: &Pose,
         _g1: &dyn Shape,
         _g2: &dyn Shape,
-    ) -> Result<Real, Unsupported> {
+    ) -> Result<ShapeDistance, Unsupported> {
         Err(Unsupported)
     }
 
@@ -521,6 +518,7 @@ fn intersects(pos12: &Pose, planet: &Planet, other: &dyn Shape) -> bool {
     planet.map_elements_in_local_sphere(&bounds, &aabb, |_, _, _, triangle| {
         intersects = dispatcher
             .intersection_test(pos12, triangle, other)
+            .map(|x| x.intersecting)
             .unwrap_or(false);
         !intersects
     });
@@ -623,8 +621,8 @@ fn compute_nonlinear_toi(
 impl<ManifoldData, ContactData> PersistentQueryDispatcher<ManifoldData, ContactData>
     for PlanetDispatcher
 where
-    ManifoldData: Default + Clone,
-    ContactData: Default + Copy,
+    ManifoldData: Default + Clone + Send + Sync,
+    ContactData: Default + Copy + Send + Sync,
 {
     fn contact_manifolds(
         &self,
@@ -704,8 +702,8 @@ fn compute_manifolds<ManifoldData, ContactData>(
     workspace: &mut Option<ContactManifoldsWorkspace>,
     flipped: bool,
 ) where
-    ManifoldData: Default + Clone,
-    ContactData: Default + Copy,
+    ManifoldData: Default + Clone + Send + Sync,
+    ContactData: Default + Copy + Send + Sync,
 {
     let workspace = workspace
         .get_or_insert_with(|| ContactManifoldsWorkspace(Box::<Workspace>::default()))
@@ -808,8 +806,8 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
     workspace: &mut Option<ContactManifoldsWorkspace>,
     flipped: bool,
 ) where
-    ManifoldData: Default + Clone,
-    ContactData: Default + Copy,
+    ManifoldData: Default + Clone + Send + Sync,
+    ContactData: Default + Copy + Send + Sync,
 {
     let workspace = workspace
         .get_or_insert_with(|| ContactManifoldsWorkspace(Box::<WorkspaceVsComposite>::default()))
@@ -1388,16 +1386,22 @@ mod tests {
             PLANET_RADIUS,
         );
 
-        assert!(PlanetDispatcher
-            .intersection_test(&Pose::translation(PLANET_RADIUS, 0.0, 0.0), &planet, &ball,)
-            .unwrap());
-        assert!(!PlanetDispatcher
-            .intersection_test(
-                &Pose::translation(PLANET_RADIUS + ball.radius * 2.0, 0.0, 0.0),
-                &planet,
-                &ball,
-            )
-            .unwrap());
+        assert!(
+            PlanetDispatcher
+                .intersection_test(&Pose::translation(PLANET_RADIUS, 0.0, 0.0), &planet, &ball,)
+                .unwrap()
+                .intersecting
+        );
+        assert!(
+            !PlanetDispatcher
+                .intersection_test(
+                    &Pose::translation(PLANET_RADIUS + ball.radius * 2.0, 0.0, 0.0),
+                    &planet,
+                    &ball,
+                )
+                .unwrap()
+                .intersecting
+        );
     }
 
     #[test]
