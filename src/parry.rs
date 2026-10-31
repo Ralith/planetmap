@@ -21,7 +21,9 @@ use parry3d_f64::{
         RayIntersection, ShapeCastHit, ShapeCastOptions, ShapeDistance, ShapeIntersection,
         TypedWorkspaceData, Unsupported, WorkspaceData,
     },
-    shape::{CompositeShape, FeatureId, HalfSpace, Shape, ShapeType, Triangle, TypedShape},
+    shape::{
+        CompositeShape, FeatureId, HalfSpace, Shape, ShapeType, SubShapeId, Triangle, TypedShape,
+    },
     utils::PoseOpt,
 };
 
@@ -127,8 +129,18 @@ impl Planet {
         samples
     }
 
-    fn feature_id(&self, slot: u32, triangle: u32) -> u32 {
-        slot * self.chunk_resolution * self.chunk_resolution + triangle
+    /// Number of triangles in a single chunk, i.e. the stride between chunk slots in
+    /// [`Self::subshape_id`].
+    fn triangles_per_chunk(&self) -> u32 {
+        2 * (self.chunk_resolution - 1).pow(2)
+    }
+
+    /// Identifier of a triangle's part of the shape.
+    ///
+    /// Unique among the triangles currently cached, though a triangle's ID changes if its chunk
+    /// is evicted and reloaded into a different slot.
+    fn subshape_id(&self, slot: u32, triangle: u32) -> SubShapeId {
+        slot * self.triangles_per_chunk() + triangle
     }
 
     /// Applies the function `f` to all the triangles intersecting the given sphere. Exits early on
@@ -216,7 +228,7 @@ impl RayCast for Planet {
                 };
                 let quad_index = quad.position.y * self.chunk_resolution + quad.position.x;
                 let index = (quad_index << 1) | tri as u32;
-                hit.feature = FeatureId::Face(self.feature_id(slot, index));
+                hit.subshape = self.subshape_id(slot, index);
                 maybe_hit = Some(hit);
                 false
             });
@@ -285,13 +297,16 @@ impl PointQuery for Planet {
         let cache = &mut *self.cache.lock().unwrap();
         let (slot, data) = cache.get(self, &coords);
         let patch = Patch::new(&coords, self.terrain.face_resolution());
-        let (idx, nearest) = patch
+        let (idx, (mut nearest, feature)) = patch
             .triangles(self.radius, self.chunk_resolution, &data.samples)
-            .map(|(i, tri)| (i, tri.project_local_point(pt, false)))
-            .min_by(|(_, x), (_, y)| distance2(x.point).partial_cmp(&distance2(y.point)).unwrap())
+            .map(|(i, tri)| (i, tri.project_local_point_and_get_feature(pt)))
+            .min_by(|(_, (x, _)), (_, (y, _))| {
+                distance2(x.point).partial_cmp(&distance2(y.point)).unwrap()
+            })
             .unwrap();
         // TODO: Check neighborhood, so we don't miss as many cliff faces
-        (nearest, FeatureId::Face(self.feature_id(slot, idx)))
+        nearest.subshape = self.subshape_id(slot, idx);
+        (nearest, feature)
     }
 }
 
@@ -417,10 +432,10 @@ impl QueryDispatcher for PlanetDispatcher {
         g2: &dyn Shape,
     ) -> Result<ShapeIntersection, Unsupported> {
         if let Some(p1) = g1.as_shape::<Planet>() {
-            return Ok(intersects(pos12, p1, g2).into());
+            return Ok(intersects(pos12, p1, g2));
         }
         if let Some(p2) = g2.as_shape::<Planet>() {
-            return Ok(intersects(&pos12.inverse(), p2, g1).into());
+            return Ok(intersects(&pos12.inverse(), p2, g1).swapped());
         }
         Err(Unsupported)
     }
@@ -509,20 +524,26 @@ impl QueryDispatcher for PlanetDispatcher {
     }
 }
 
-fn intersects(pos12: &Pose, planet: &Planet, other: &dyn Shape) -> bool {
+/// Reports whether `other` intersects `planet`, along with the sub-shapes of both that intersect.
+fn intersects(pos12: &Pose, planet: &Planet, other: &dyn Shape) -> ShapeIntersection {
     // TODO after https://github.com/dimforge/parry/issues/8
     let dispatcher = DefaultQueryDispatcher;
     let bounds = other.compute_bounding_sphere(pos12);
     let aabb = other.compute_aabb(pos12);
-    let mut intersects = false;
-    planet.map_elements_in_local_sphere(&bounds, &aabb, |_, _, _, triangle| {
-        intersects = dispatcher
-            .intersection_test(pos12, triangle, other)
-            .map(|x| x.intersecting)
-            .unwrap_or(false);
-        !intersects
+    let mut hit = ShapeIntersection::new(false);
+    planet.map_elements_in_local_sphere(&bounds, &aabb, |_, slot, index, triangle| {
+        match dispatcher.intersection_test(pos12, triangle, other) {
+            Ok(mut result) if result.intersecting => {
+                // The triangle is shape 1 and `other` is shape 2, so `result.subshape2` already
+                // identifies the part of `other` that was hit, if it's a composite shape.
+                result.subshape1 = planet.subshape_id(slot, index);
+                hit = result;
+                false
+            }
+            _ => true,
+        }
     });
-    intersects
+    hit
 }
 
 fn compute_toi(
@@ -542,21 +563,31 @@ fn compute_toi(
         start.merged(&end)
     };
     let mut closest = None::<ShapeCastHit>;
-    planet.map_elements_in_local_sphere(&aabb.bounding_sphere(), &aabb, |_, _, _, triangle| {
-        let impact = if flipped {
-            dispatcher.cast_shapes(&pos12.inverse(), -vel12, other, triangle, options)
-        } else {
-            dispatcher.cast_shapes(pos12, vel12, triangle, other, options)
-        };
-        if let Ok(Some(impact)) = impact {
-            closest = Some(match closest {
-                None => impact,
-                Some(x) if impact.time_of_impact < x.time_of_impact => impact,
-                Some(x) => x,
-            });
-        }
-        true
-    });
+    planet.map_elements_in_local_sphere(
+        &aabb.bounding_sphere(),
+        &aabb,
+        |_, slot, index, triangle| {
+            let impact = if flipped {
+                dispatcher.cast_shapes(&pos12.inverse(), -vel12, other, triangle, options)
+            } else {
+                dispatcher.cast_shapes(pos12, vel12, triangle, other, options)
+            };
+            if let Ok(Some(mut impact)) = impact {
+                let subshape = planet.subshape_id(slot, index);
+                if flipped {
+                    impact.subshape2 = subshape;
+                } else {
+                    impact.subshape1 = subshape;
+                }
+                closest = Some(match closest {
+                    None => impact,
+                    Some(x) if impact.time_of_impact < x.time_of_impact => impact,
+                    Some(x) => x,
+                });
+            }
+            true
+        },
+    );
     closest
 }
 
@@ -584,37 +615,47 @@ fn compute_nonlinear_toi(
         start.merged(&end)
     };
     let mut closest = None::<ShapeCastHit>;
-    planet.map_elements_in_local_sphere(&aabb.bounding_sphere(), &aabb, |_, _, _, triangle| {
-        let impact = if flipped {
-            dispatcher.cast_shapes_nonlinear(
-                motion_other,
-                other,
-                motion_planet,
-                triangle,
-                start_time,
-                end_time,
-                stop_at_penetration,
-            )
-        } else {
-            dispatcher.cast_shapes_nonlinear(
-                motion_planet,
-                triangle,
-                motion_other,
-                other,
-                start_time,
-                end_time,
-                stop_at_penetration,
-            )
-        };
-        if let Ok(Some(impact)) = impact {
-            closest = Some(match closest {
-                None => impact,
-                Some(x) if impact.time_of_impact < x.time_of_impact => impact,
-                Some(x) => x,
-            });
-        }
-        true
-    });
+    planet.map_elements_in_local_sphere(
+        &aabb.bounding_sphere(),
+        &aabb,
+        |_, slot, index, triangle| {
+            let impact = if flipped {
+                dispatcher.cast_shapes_nonlinear(
+                    motion_other,
+                    other,
+                    motion_planet,
+                    triangle,
+                    start_time,
+                    end_time,
+                    stop_at_penetration,
+                )
+            } else {
+                dispatcher.cast_shapes_nonlinear(
+                    motion_planet,
+                    triangle,
+                    motion_other,
+                    other,
+                    start_time,
+                    end_time,
+                    stop_at_penetration,
+                )
+            };
+            if let Ok(Some(mut impact)) = impact {
+                let subshape = planet.subshape_id(slot, index);
+                if flipped {
+                    impact.subshape2 = subshape;
+                } else {
+                    impact.subshape1 = subshape;
+                }
+                closest = Some(match closest {
+                    None => impact,
+                    Some(x) if impact.time_of_impact < x.time_of_impact => impact,
+                    Some(x) => x,
+                });
+            }
+            true
+        },
+    );
     closest
 }
 
@@ -736,11 +777,19 @@ fn compute_manifolds<ManifoldData, ContactData>(
                     phase,
                 };
 
-                let id = planet.feature_id(slot, index);
-                let (id1, id2) = if flipped { (0, id) } else { (id, 0) };
+                let subshape = planet.subshape_id(slot, index);
+                // `other`'s subshape is 0 because only composite shapes have subshapes, and those
+                // take the `compute_manifolds_vs_composite` path. TODO: Supporting other shapes
+                // with subshapes (height fields, voxels) would mean dispatching through
+                // `contact_manifolds` so that `other` can report its own subshape IDs.
+                let (subshape1, subshape2) = if flipped {
+                    (0, subshape)
+                } else {
+                    (subshape, 0)
+                };
                 manifolds.push(ContactManifold::with_data(
-                    id1,
-                    id2,
+                    subshape1,
+                    subshape2,
                     ManifoldData::default(),
                 ));
 
@@ -854,13 +903,13 @@ fn compute_manifolds_vs_composite<ManifoldData, ContactData>(
                         }
                         hash_map::Entry::Vacant(e) => {
                             let mut manifold = ContactManifold::new();
-                            let id = planet.feature_id(slot, index);
+                            let subshape = planet.subshape_id(slot, index);
                             if flipped {
                                 manifold.subshape1 = composite_subshape;
-                                manifold.subshape2 = id;
+                                manifold.subshape2 = subshape;
                                 manifold.set_subshape_pos1(composite_part_pos.copied());
                             } else {
-                                manifold.subshape1 = id;
+                                manifold.subshape1 = subshape;
                                 manifold.subshape2 = composite_subshape;
                                 manifold.set_subshape_pos2(composite_part_pos.copied());
                             };
@@ -1166,7 +1215,11 @@ fn walk_patch(
 #[cfg(test)]
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
-    use parry3d_f64::{math::Rotation, query::ShapeCastStatus, shape::Ball};
+    use parry3d_f64::{
+        math::Rotation,
+        query::ShapeCastStatus,
+        shape::{Ball, TriMesh},
+    };
 
     use crate::cubemap::Face;
 
@@ -1297,6 +1350,79 @@ mod tests {
         assert_relative_eq!(impact.witness2, Vector::new(-ball.radius, 0.0, 0.0));
         assert_relative_eq!(impact.normal1, Vector::X);
         assert_relative_eq!(impact.normal2, -Vector::X);
+    }
+
+    #[test]
+    fn subshape_id_unique() {
+        let planet = Planet::new(Arc::new(FlatTerrain::new(2u32.pow(12), 17)), 32, 1.0);
+        let stride = planet.triangles_per_chunk();
+        assert_eq!(planet.subshape_id(1, 0) - planet.subshape_id(0, 0), stride);
+        // The last triangle of one chunk must not alias the first triangle of the next.
+        assert!(planet.subshape_id(0, stride - 1) < planet.subshape_id(1, 0));
+    }
+
+    #[test]
+    fn subshapes_consistent() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        const DISTANCE: f64 = 10.0;
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
+            32,
+            PLANET_RADIUS,
+        );
+        // A point well within a single triangle, away from chunk and triangle edges.
+        let point = Vector::new(PLANET_RADIUS, 123.0, 456.0);
+        let (proj, _) = planet.project_local_point_and_get_feature(point);
+        let hit = planet
+            .cast_local_ray_and_get_normal(
+                &Ray {
+                    origin: point + Vector::X * DISTANCE,
+                    dir: -Vector::X,
+                },
+                100.0,
+                true,
+            )
+            .expect("hit not found");
+        assert_eq!(hit.subshape, proj.subshape);
+        assert!(hit.subshape < planet.triangles_per_chunk() * 32);
+    }
+
+    #[test]
+    fn intersection_subshapes() {
+        const PLANET_RADIUS: f64 = 6371e3;
+        let planet = Planet::new(
+            Arc::new(FlatTerrain::new(2u32.pow(12), 17)),
+            32,
+            PLANET_RADIUS,
+        );
+        // The first triangle hovers above the surface; the second pierces it.
+        let mesh = TriMesh::new(
+            vec![
+                Vector::new(PLANET_RADIUS + 500.0, -10.0, -10.0),
+                Vector::new(PLANET_RADIUS + 500.0, 10.0, -10.0),
+                Vector::new(PLANET_RADIUS + 500.0, 0.0, 10.0),
+                Vector::new(PLANET_RADIUS - 10.0, -10.0, -10.0),
+                Vector::new(PLANET_RADIUS - 10.0, 10.0, -10.0),
+                Vector::new(PLANET_RADIUS + 10.0, 0.0, 0.0),
+            ],
+            vec![[0, 1, 2], [3, 4, 5]],
+        )
+        .unwrap();
+
+        let planet_first = PlanetDispatcher
+            .intersection_test(&Pose::identity(), &planet, &mesh)
+            .unwrap();
+        assert!(planet_first.intersecting);
+        // The mesh's own subshape must survive when the planet's is filled in.
+        assert_eq!(planet_first.subshape2, 1);
+        assert!(planet_first.subshape1 < planet.triangles_per_chunk() * 32);
+
+        let mesh_first = PlanetDispatcher
+            .intersection_test(&Pose::identity(), &mesh, &planet)
+            .unwrap();
+        assert!(mesh_first.intersecting);
+        assert_eq!(mesh_first.subshape1, 1);
+        assert!(mesh_first.subshape2 < planet.triangles_per_chunk() * 32);
     }
 
     #[test]
