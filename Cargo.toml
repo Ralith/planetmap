@@ -14,7 +14,7 @@ parry = ["parry3d-f64", "lru-slab", "glam"]
 fearless_simd = ["dep:fearless_simd"]
 
 [dependencies]
-na = { package = "nalgebra", version = "0.34.1" }
+na = { package = "nalgebra", version = "0.35.0" }
 glam = { version = "0.33", optional = true, default-features = false, features = ["float-types", "integer-types"] }
 slab = "0.4.2"
 hashbrown = "0.17"
